@@ -2,7 +2,8 @@ use bevy::prelude::*;
 
 use super::config::WorldConfig;
 use super::constants::{
-    CLUSTER_A_HI, CLUSTER_A_LO, CLUSTER_B_HI, CLUSTER_B_LO, CLUSTER_C_HI, CLUSTER_C_LO, FLOOR_Y,
+    CLUSTER_A_HI, CLUSTER_A_LO, CLUSTER_B_HI, CLUSTER_B_LO, CLUSTER_C_HI, CLUSTER_C_LO,
+    CLUSTER_D_HI, CLUSTER_D_LO, CLUSTER_E_HI, CLUSTER_E_LO, CLUSTER_F_HI, CLUSTER_F_LO, FLOOR_Y,
 };
 use super::ground_truth::GroundTruthMap;
 
@@ -13,6 +14,9 @@ pub fn build_test_scene(mut commands: Commands, config: Res<WorldConfig>) {
     fill_box(&mut map, CLUSTER_A_LO, CLUSTER_A_HI);
     fill_box(&mut map, CLUSTER_B_LO, CLUSTER_B_HI);
     fill_box(&mut map, CLUSTER_C_LO, CLUSTER_C_HI);
+    fill_box(&mut map, CLUSTER_D_LO, CLUSTER_D_HI);
+    fill_box(&mut map, CLUSTER_E_LO, CLUSTER_E_HI);
+    fill_box(&mut map, CLUSTER_F_LO, CLUSTER_F_HI);
 
     info!("ground truth: {} occupied cells", map.count_occupied());
     commands.insert_resource(map);

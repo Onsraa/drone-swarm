@@ -8,7 +8,7 @@ pub const DEFAULT_DRONE_COUNT: u32 = 3;
 pub const MIN_DRONE_COUNT: u32 = 1;
 pub const MAX_DRONE_COUNT: u32 = 50;
 /// Horizontal radius (meters) of the spawn ring around the world center.
-pub const DRONE_SPAWN_RADIUS_METERS: f32 = 5.0;
+pub const DRONE_SPAWN_RADIUS_METERS: f32 = 12.0;
 /// Golden-angle-in-degrees offset between consecutive drone hues so 50+
 /// drones still get well-spaced, perceptually distinct colors.
 pub const DRONE_HUE_STEP_DEGREES: f32 = 137.508;
@@ -21,7 +21,7 @@ pub const DRONE_COLOR_ALPHA: f32 = 0.85;
 /// modeled with +Z as forward; this rotates it 180 deg around Y.
 pub const MODEL_YAW_OFFSET_RADIANS: f32 = PI;
 
-pub const CRUISE_SPEED_MPS: f32 = 3.0;
+pub const CRUISE_SPEED_MPS: f32 = 5.0;
 /// Vertical-component bias for wander direction. < 1.0 makes the drone prefer
 /// horizontal motion (planar wandering) while still exploring up and down.
 pub const VERTICAL_SPEED_FACTOR: f32 = 0.4;
