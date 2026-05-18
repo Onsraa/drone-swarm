@@ -11,9 +11,9 @@ pub struct UiState {
 impl Default for UiState {
     fn default() -> Self {
         Self {
-            show_ground_truth: true,
-            show_local_maps: false,
-            show_global_map: true,
+            show_ground_truth: false,
+            show_local_maps: true,
+            show_global_map: false,
             show_rays: false,
         }
     }
