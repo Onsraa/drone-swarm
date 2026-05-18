@@ -1,5 +1,6 @@
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
+use bevy::render::view::NoIndirectDrawing;
 
 use crate::world::WorldConfig;
 
@@ -16,6 +17,9 @@ pub fn spawn_camera(mut commands: Commands, world: Res<WorldConfig>) {
             ..Default::default()
         },
         Transform::default(),
+        // Required by our custom instanced render command which uses
+        // direct `draw_indexed` / `draw` instead of the indirect variants.
+        NoIndirectDrawing,
     ));
 }
 

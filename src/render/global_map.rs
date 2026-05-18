@@ -1,56 +1,60 @@
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::prelude::*;
 
 use crate::map::{CellState, GlobalMap};
 use crate::world::WorldConfig;
 
-use super::assets::VoxelAssets;
 use super::components::GlobalMapVoxel;
-use super::mesh_builder::{build_voxel_chunk_mesh, empty_voxel_mesh};
-use super::resources::GlobalMapRender;
+use super::constants::GLOBAL_OCCUPIED_INSTANCE_COLOR;
+use super::instancing::{InstanceData, InstancedVoxelLayer};
+use super::resources::CubeMesh;
 
-/// One chunk mesh for the entire global map. Rebuilt only on frames when
-/// the `GlobalMap` resource was written to (i.e. merge ticks).
+/// One instanced layer for the entire global map. Rebuild the instance
+/// buffer only on frames where the `GlobalMap` resource was written to.
 pub fn sync_global_map(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    assets: Option<Res<VoxelAssets>>,
+    cube: Res<CubeMesh>,
     config: Res<WorldConfig>,
     global: Option<Res<GlobalMap>>,
-    mut render: ResMut<GlobalMapRender>,
+    mut layer_q: Query<&mut InstancedVoxelLayer, With<GlobalMapVoxel>>,
+    layer_exists_q: Query<(), With<GlobalMapVoxel>>,
 ) {
-    let (Some(assets), Some(global)) = (assets, global) else {
+    let Some(global) = global else {
         return;
     };
-    if !global.is_changed() && render.handle.is_some() {
+    if !global.is_changed() && !layer_exists_q.is_empty() {
         return;
     }
 
-    let occupied: Vec<IVec3> = global
+    let instances = build_instances(&global, config.voxel_size);
+
+    if let Ok(mut layer) = layer_q.single_mut() {
+        layer.0 = instances;
+    } else {
+        commands.spawn((
+            GlobalMapVoxel,
+            Mesh3d(cube.0.clone()),
+            InstancedVoxelLayer(instances),
+            NoFrustumCulling,
+            Transform::IDENTITY,
+            Visibility::default(),
+        ));
+    }
+}
+
+fn build_instances(global: &GlobalMap, voxel_size: f32) -> Vec<InstanceData> {
+    let half = voxel_size * 0.5;
+    global
         .0
         .iter_known()
-        .filter_map(|(cell, state)| (state == CellState::Occupied).then_some(cell))
-        .collect();
-    let mesh = if occupied.is_empty() {
-        empty_voxel_mesh()
-    } else {
-        build_voxel_chunk_mesh(occupied, config.voxel_size)
-    };
-
-    match render.handle.as_ref() {
-        Some(handle) => {
-            if let Some(asset) = meshes.get_mut(handle) {
-                *asset = mesh;
-            }
-        }
-        None => {
-            let handle = meshes.add(mesh);
-            commands.spawn((
-                GlobalMapVoxel,
-                Mesh3d(handle.clone()),
-                MeshMaterial3d(assets.global_occupied_mat.clone()),
-                Transform::IDENTITY,
-            ));
-            render.handle = Some(handle);
-        }
-    }
+        .filter_map(|(cell, state)| {
+            (state == CellState::Occupied).then(|| {
+                let pos = cell.as_vec3() * voxel_size + Vec3::splat(half);
+                InstanceData {
+                    pos_scale: [pos.x, pos.y, pos.z, voxel_size],
+                    color: GLOBAL_OCCUPIED_INSTANCE_COLOR,
+                }
+            })
+        })
+        .collect()
 }

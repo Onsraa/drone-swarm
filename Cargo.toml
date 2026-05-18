@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 bevy = "0.18.1"
 bevy_egui = "0.39.1"
+bytemuck = { version = "1.25.0", features = ["derive"] }
 rand = "0.10.1"

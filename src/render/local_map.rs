@@ -1,73 +1,65 @@
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::prelude::*;
 
 use crate::drone::{Drone, DroneColor};
 use crate::map::{CellState, LocalMap};
 use crate::world::WorldConfig;
 
-use super::components::{DroneMaterial, LocalMapMeshHandle, LocalMapVoxel, OwnedByDrone};
-use super::constants::LOCAL_MAP_EMISSIVE_FACTOR;
-use super::mesh_builder::{build_voxel_chunk_mesh, empty_voxel_mesh};
+use super::components::LocalMapVoxel;
+use super::constants::{LOCAL_MAP_ALPHA, LOCAL_MAP_COLOR_FACTOR};
+use super::instancing::{InstanceData, InstancedVoxelLayer};
+use super::resources::CubeMesh;
 
-/// On each new drone, lazily create its per-drone material + per-drone
-/// mesh entity, and link them via `LocalMapMeshHandle`. The render module
-/// is the sole owner of `StandardMaterial` and `Mesh` for the drone's
-/// local-map visualization, so the drone module never touches those.
-pub fn ensure_local_render(
+/// One instanced layer aggregating every drone's local map. Per-instance
+/// color comes from each drone's `DroneColor` so all drones share a
+/// single draw call. Rebuilt every frame any drone's `LocalMap` was
+/// mutated.
+pub fn sync_local_maps(
     mut commands: Commands,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    drones_q: Query<
-        (Entity, &DroneColor),
-        (With<Drone>, With<LocalMap>, Without<LocalMapMeshHandle>),
-    >,
+    cube: Res<CubeMesh>,
+    config: Res<WorldConfig>,
+    drones_q: Query<(&LocalMap, &DroneColor), With<Drone>>,
+    changed_q: Query<(), (With<Drone>, Changed<LocalMap>)>,
+    mut layer_q: Query<&mut InstancedVoxelLayer, With<LocalMapVoxel>>,
+    layer_exists_q: Query<(), With<LocalMapVoxel>>,
 ) {
-    for (drone_entity, color) in &drones_q {
+    let no_change_yet = changed_q.is_empty() && !layer_exists_q.is_empty();
+    if no_change_yet {
+        return;
+    }
+
+    let mut instances: Vec<InstanceData> = Vec::new();
+    let voxel_size = config.voxel_size;
+    let half = voxel_size * 0.5;
+    for (local_map, color) in &drones_q {
         let linear = color.0.to_linear();
-        let material = materials.add(StandardMaterial {
-            base_color: color.0,
-            emissive: LinearRgba::rgb(
-                linear.red * LOCAL_MAP_EMISSIVE_FACTOR,
-                linear.green * LOCAL_MAP_EMISSIVE_FACTOR,
-                linear.blue * LOCAL_MAP_EMISSIVE_FACTOR,
-            ),
-            alpha_mode: AlphaMode::Blend,
-            ..Default::default()
-        });
-        let mesh_handle = meshes.add(empty_voxel_mesh());
+        let instance_color = [
+            (linear.red * LOCAL_MAP_COLOR_FACTOR).min(1.0),
+            (linear.green * LOCAL_MAP_COLOR_FACTOR).min(1.0),
+            (linear.blue * LOCAL_MAP_COLOR_FACTOR).min(1.0),
+            LOCAL_MAP_ALPHA,
+        ];
+        for (cell, state) in local_map.0.iter_known() {
+            if state == CellState::Occupied {
+                let pos = cell.as_vec3() * voxel_size + Vec3::splat(half);
+                instances.push(InstanceData {
+                    pos_scale: [pos.x, pos.y, pos.z, voxel_size],
+                    color: instance_color,
+                });
+            }
+        }
+    }
+
+    if let Ok(mut layer) = layer_q.single_mut() {
+        layer.0 = instances;
+    } else {
         commands.spawn((
             LocalMapVoxel,
-            OwnedByDrone(drone_entity),
-            Mesh3d(mesh_handle.clone()),
-            MeshMaterial3d(material.clone()),
+            Mesh3d(cube.0.clone()),
+            InstancedVoxelLayer(instances),
+            NoFrustumCulling,
             Transform::IDENTITY,
+            Visibility::default(),
         ));
-        commands.entity(drone_entity).insert((
-            DroneMaterial(material),
-            LocalMapMeshHandle { mesh: mesh_handle },
-        ));
-    }
-}
-
-/// Rebuild only the meshes whose owning drone's `LocalMap` was mutated
-/// this frame (scoped via `Changed<LocalMap>`).
-pub fn sync_local_maps(
-    mut meshes: ResMut<Assets<Mesh>>,
-    config: Res<WorldConfig>,
-    drones_q: Query<(&LocalMap, &LocalMapMeshHandle), (With<Drone>, Changed<LocalMap>)>,
-) {
-    for (local_map, handle) in &drones_q {
-        let occupied: Vec<IVec3> = local_map
-            .0
-            .iter_known()
-            .filter_map(|(cell, state)| (state == CellState::Occupied).then_some(cell))
-            .collect();
-        let new_mesh = if occupied.is_empty() {
-            empty_voxel_mesh()
-        } else {
-            build_voxel_chunk_mesh(occupied, config.voxel_size)
-        };
-        if let Some(asset) = meshes.get_mut(&handle.mesh) {
-            *asset = new_mesh;
-        }
     }
 }

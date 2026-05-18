@@ -1,29 +1,41 @@
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::prelude::*;
 
 use crate::world::{GroundTruthMap, WorldConfig};
 
-use super::assets::VoxelAssets;
 use super::components::GroundTruthVoxel;
-use super::mesh_builder::build_voxel_chunk_mesh;
+use super::constants::GROUND_TRUTH_INSTANCE_COLOR;
+use super::instancing::{InstanceData, InstancedVoxelLayer};
+use super::resources::CubeMesh;
 
-pub fn spawn_ground_truth_voxels(
+pub fn spawn_ground_truth_layer(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    assets: Res<VoxelAssets>,
+    cube: Res<CubeMesh>,
     config: Res<WorldConfig>,
     map: Res<GroundTruthMap>,
 ) {
-    let count = map.count_occupied();
-    let mesh = build_voxel_chunk_mesh(map.iter_occupied(), config.voxel_size);
-    let handle = meshes.add(mesh);
+    let instances = build_instances(&map, config.voxel_size);
+    let count = instances.len();
     commands.spawn((
         GroundTruthVoxel,
-        Mesh3d(handle),
-        MeshMaterial3d(assets.ground_mat.clone()),
+        Mesh3d(cube.0.clone()),
+        InstancedVoxelLayer(instances),
+        NoFrustumCulling,
         Transform::IDENTITY,
+        Visibility::default(),
     ));
-    info!(
-        "built ground-truth voxel chunk: {} cells in a single mesh",
-        count
-    );
+    info!("ground truth: {} instanced voxels (single draw call)", count);
+}
+
+fn build_instances(map: &GroundTruthMap, voxel_size: f32) -> Vec<InstanceData> {
+    let half = voxel_size * 0.5;
+    map.iter_occupied()
+        .map(|cell| {
+            let pos = cell.as_vec3() * voxel_size + Vec3::splat(half);
+            InstanceData {
+                pos_scale: [pos.x, pos.y, pos.z, voxel_size],
+                color: GROUND_TRUTH_INSTANCE_COLOR,
+            }
+        })
+        .collect()
 }
