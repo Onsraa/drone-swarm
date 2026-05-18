@@ -24,20 +24,25 @@ pub fn lidar_scan(
     }
     let voxel_size = config.voxel_size;
     let max_grid_steps = MAX_RANGE_METERS / voxel_size;
+    let ground_ref = &*ground;
+    let dirs_slice: &[Vec3] = &dirs.0;
 
-    for (transform, mut local, rays_opt) in &mut drones_q {
-        let origin_world = transform.translation;
-        let origin_grid = origin_world / voxel_size;
-        let mut hits: Vec<(Vec3, Vec3)> = Vec::with_capacity(dirs.0.len());
-        for &dir in &dirs.0 {
-            let end_cell = cast_ray(origin_grid, dir, max_grid_steps, &ground, &mut local.0);
-            let end_world = (end_cell.as_vec3() + Vec3::splat(0.5)) * voxel_size;
-            hits.push((origin_world, end_world));
-        }
-        if let Some(mut rays) = rays_opt {
-            rays.0 = hits;
-        }
-    }
+    drones_q
+        .par_iter_mut()
+        .for_each(|(transform, mut local, rays_opt)| {
+            let origin_world = transform.translation;
+            let origin_grid = origin_world / voxel_size;
+            let mut hits: Vec<(Vec3, Vec3)> = Vec::with_capacity(dirs_slice.len());
+            for &dir in dirs_slice {
+                let end_cell =
+                    cast_ray(origin_grid, dir, max_grid_steps, ground_ref, &mut local.0);
+                let end_world = (end_cell.as_vec3() + Vec3::splat(0.5)) * voxel_size;
+                hits.push((origin_world, end_world));
+            }
+            if let Some(mut rays) = rays_opt {
+                rays.0 = hits;
+            }
+        });
 }
 
 fn cast_ray(

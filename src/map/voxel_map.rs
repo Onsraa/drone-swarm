@@ -1,5 +1,4 @@
-use std::collections::HashSet;
-
+use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -13,12 +12,10 @@ pub enum CellState {
 pub struct VoxelMap {
     pub dims: UVec3,
     cells: Vec<CellState>,
-    /// All cells whose current state is non-`Unknown`. Lets `iter_known` and
-    /// `count_known` run in O(known) instead of O(dims.x * dims.y * dims.z),
-    /// which matters once the world grows past a few tens of thousands of
-    /// cells (per-frame instance rebuilds were the cause of the periodic
-    /// hitch otherwise).
-    known: HashSet<IVec3>,
+    /// Flat-index set of all non-`Unknown` cells. Linearised to `u32` so the
+    /// FxHash-backed `bevy::platform` HashSet hashes a single integer per
+    /// insert/lookup instead of the three i32 fields of `IVec3`.
+    known: HashSet<u32>,
     free_count: usize,
     occupied_count: usize,
 }
@@ -29,13 +26,13 @@ impl VoxelMap {
         Self {
             dims,
             cells: vec![CellState::Unknown; n],
-            known: HashSet::new(),
+            known: HashSet::default(),
             free_count: 0,
             occupied_count: 0,
         }
     }
 
-    pub fn idx(&self, p: IVec3) -> Option<usize> {
+    pub fn idx(&self, p: IVec3) -> Option<u32> {
         if p.x < 0 || p.y < 0 || p.z < 0 {
             return None;
         }
@@ -43,12 +40,12 @@ impl VoxelMap {
         if x >= self.dims.x || y >= self.dims.y || z >= self.dims.z {
             return None;
         }
-        Some((x + y * self.dims.x + z * self.dims.x * self.dims.y) as usize)
+        Some(x + y * self.dims.x + z * self.dims.x * self.dims.y)
     }
 
     pub fn get(&self, p: IVec3) -> CellState {
         self.idx(p)
-            .map(|i| self.cells[i])
+            .map(|i| self.cells[i as usize])
             .unwrap_or(CellState::Unknown)
     }
 
@@ -58,7 +55,8 @@ impl VoxelMap {
         let Some(i) = self.idx(p) else {
             return;
         };
-        let cur = self.cells[i];
+        let idx = i as usize;
+        let cur = self.cells[idx];
         let new_state = match (cur, observed) {
             (CellState::Occupied, _) | (_, CellState::Occupied) => CellState::Occupied,
             (CellState::Free, _) | (_, CellState::Free) => CellState::Free,
@@ -69,11 +67,11 @@ impl VoxelMap {
         }
         self.adjust_counts(cur, new_state);
         if cur == CellState::Unknown && new_state != CellState::Unknown {
-            self.known.insert(p);
+            self.known.insert(i);
         } else if new_state == CellState::Unknown && cur != CellState::Unknown {
-            self.known.remove(&p);
+            self.known.remove(&i);
         }
-        self.cells[i] = new_state;
+        self.cells[idx] = new_state;
     }
 
     fn adjust_counts(&mut self, old: CellState, new: CellState) {
@@ -94,6 +92,19 @@ impl VoxelMap {
     }
 
     pub fn iter_known(&self) -> impl Iterator<Item = (IVec3, CellState)> + '_ {
-        self.known.iter().map(move |&p| (p, self.get(p)))
+        let dims = self.dims;
+        self.known.iter().map(move |&i| {
+            let cell = unflatten(i, dims);
+            (cell, self.cells[i as usize])
+        })
     }
+}
+
+fn unflatten(flat: u32, dims: UVec3) -> IVec3 {
+    let plane = dims.x * dims.y;
+    let z = flat / plane;
+    let rem = flat % plane;
+    let y = rem / dims.x;
+    let x = rem % dims.x;
+    IVec3::new(x as i32, y as i32, z as i32)
 }
