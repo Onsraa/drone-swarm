@@ -1,16 +1,19 @@
 use bevy::prelude::*;
 
 mod camera;
+mod voxel_render;
 mod world;
 
 use camera::OrbitCameraPlugin;
-use world::WorldConfig;
+use voxel_render::VoxelRenderPlugin;
+use world::{WorldConfig, WorldPlugin};
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(WorldPlugin)
+        .add_plugins(VoxelRenderPlugin)
         .add_plugins(OrbitCameraPlugin)
-        .insert_resource(WorldConfig::default())
         .add_systems(Startup, setup_lighting)
         .add_systems(Update, draw_world_bounds)
         .run();
