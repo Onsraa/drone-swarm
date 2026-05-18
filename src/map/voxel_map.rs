@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -11,6 +13,14 @@ pub enum CellState {
 pub struct VoxelMap {
     pub dims: UVec3,
     cells: Vec<CellState>,
+    /// All cells whose current state is non-`Unknown`. Lets `iter_known` and
+    /// `count_known` run in O(known) instead of O(dims.x * dims.y * dims.z),
+    /// which matters once the world grows past a few tens of thousands of
+    /// cells (per-frame instance rebuilds were the cause of the periodic
+    /// hitch otherwise).
+    known: HashSet<IVec3>,
+    free_count: usize,
+    occupied_count: usize,
 }
 
 impl VoxelMap {
@@ -19,6 +29,9 @@ impl VoxelMap {
         Self {
             dims,
             cells: vec![CellState::Unknown; n],
+            known: HashSet::new(),
+            free_count: 0,
+            occupied_count: 0,
         }
     }
 
@@ -46,35 +59,41 @@ impl VoxelMap {
             return;
         };
         let cur = self.cells[i];
-        self.cells[i] = match (cur, observed) {
+        let new_state = match (cur, observed) {
             (CellState::Occupied, _) | (_, CellState::Occupied) => CellState::Occupied,
             (CellState::Free, _) | (_, CellState::Free) => CellState::Free,
             _ => CellState::Unknown,
         };
+        if new_state == cur {
+            return;
+        }
+        self.adjust_counts(cur, new_state);
+        if cur == CellState::Unknown && new_state != CellState::Unknown {
+            self.known.insert(p);
+        } else if new_state == CellState::Unknown && cur != CellState::Unknown {
+            self.known.remove(&p);
+        }
+        self.cells[i] = new_state;
+    }
+
+    fn adjust_counts(&mut self, old: CellState, new: CellState) {
+        match old {
+            CellState::Free => self.free_count -= 1,
+            CellState::Occupied => self.occupied_count -= 1,
+            _ => {}
+        }
+        match new {
+            CellState::Free => self.free_count += 1,
+            CellState::Occupied => self.occupied_count += 1,
+            _ => {}
+        }
     }
 
     pub fn count_known(&self) -> (usize, usize) {
-        let mut free = 0;
-        let mut occ = 0;
-        for c in &self.cells {
-            match c {
-                CellState::Free => free += 1,
-                CellState::Occupied => occ += 1,
-                _ => {}
-            }
-        }
-        (free, occ)
+        (self.free_count, self.occupied_count)
     }
 
     pub fn iter_known(&self) -> impl Iterator<Item = (IVec3, CellState)> + '_ {
-        let dx = self.dims.x as i32;
-        let dy = self.dims.y as i32;
-        let dz = self.dims.z as i32;
-        (0..dz)
-            .flat_map(move |z| (0..dy).flat_map(move |y| (0..dx).map(move |x| IVec3::new(x, y, z))))
-            .filter_map(move |p| {
-                let s = self.get(p);
-                (s != CellState::Unknown).then_some((p, s))
-            })
+        self.known.iter().map(move |&p| (p, self.get(p)))
     }
 }
