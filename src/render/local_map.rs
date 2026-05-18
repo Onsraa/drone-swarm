@@ -52,7 +52,7 @@ pub fn sync_local_maps(
 
     if let Ok(mut layer) = layer_q.single_mut() {
         layer.0 = instances;
-    } else {
+    } else if !instances.is_empty() {
         commands.spawn((
             LocalMapVoxel,
             Mesh3d(cube.0.clone()),

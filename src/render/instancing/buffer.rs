@@ -16,6 +16,10 @@ pub fn prepare_instance_buffers(
     render_device: Res<RenderDevice>,
 ) {
     for (entity, layer) in &layers_q {
+        if layer.0.is_empty() {
+            commands.entity(entity).remove::<InstanceBuffer>();
+            continue;
+        }
         let buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("voxel instance buffer"),
             contents: bytemuck::cast_slice(layer.0.as_slice()),
