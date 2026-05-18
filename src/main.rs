@@ -1,10 +1,12 @@
 use bevy::prelude::*;
 
 mod camera;
+mod drone;
 mod voxel_render;
 mod world;
 
 use camera::OrbitCameraPlugin;
+use drone::DronePlugin;
 use voxel_render::VoxelRenderPlugin;
 use world::{WorldConfig, WorldPlugin};
 
@@ -13,6 +15,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugins(WorldPlugin)
         .add_plugins(VoxelRenderPlugin)
+        .add_plugins(DronePlugin)
         .add_plugins(OrbitCameraPlugin)
         .add_systems(Startup, setup_lighting)
         .add_systems(Update, draw_world_bounds)
