@@ -3,6 +3,8 @@ use bevy::gltf::GltfAssetLabel;
 use bevy::prelude::*;
 use rand::{Rng, RngExt};
 
+use crate::lidar::LastScanRays;
+use crate::map::{LocalMap, VoxelMap};
 use crate::world::WorldConfig;
 
 #[derive(Component)]
@@ -55,6 +57,8 @@ fn spawn_drone(mut commands: Commands, asset_server: Res<AssetServer>, config: R
             )),
             Transform::from_translation(pos).with_scale(Vec3::splat(DRONE_SCALE)),
             Visibility::default(),
+            LocalMap(VoxelMap::new(config.size)),
+            LastScanRays::default(),
         ))
         .with_children(|p| {
             p.spawn((

@@ -1,22 +1,31 @@
 use bevy::prelude::*;
+use bevy_egui::EguiPlugin;
 
 mod camera;
 mod drone;
+mod lidar;
+mod map;
+mod ui;
 mod voxel_render;
 mod world;
 
 use camera::OrbitCameraPlugin;
 use drone::DronePlugin;
+use lidar::LidarPlugin;
+use ui::UiPlugin;
 use voxel_render::VoxelRenderPlugin;
 use world::{WorldConfig, WorldPlugin};
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(EguiPlugin::default())
         .add_plugins(WorldPlugin)
         .add_plugins(VoxelRenderPlugin)
         .add_plugins(DronePlugin)
+        .add_plugins(LidarPlugin)
         .add_plugins(OrbitCameraPlugin)
+        .add_plugins(UiPlugin)
         .add_systems(Startup, setup_lighting)
         .add_systems(Update, draw_world_bounds)
         .run();
