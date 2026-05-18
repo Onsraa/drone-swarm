@@ -5,7 +5,7 @@ use crate::map::{CellState, LocalMap};
 use crate::world::WorldConfig;
 
 use super::assets::VoxelAssets;
-use super::components::{DroneMaterial, LocalMapRender, LocalMapVoxel};
+use super::components::{DroneMaterial, LocalMapRender, LocalMapVoxel, OwnedByDrone};
 use super::constants::LOCAL_MAP_EMISSIVE_FACTOR;
 
 /// Lazily create per-drone material + render tracker. Lives in the render
@@ -40,7 +40,7 @@ pub fn sync_local_maps(
     mut commands: Commands,
     assets: Option<Res<VoxelAssets>>,
     config: Res<WorldConfig>,
-    mut drones_q: Query<(&LocalMap, &mut LocalMapRender, &DroneMaterial), With<Drone>>,
+    mut drones_q: Query<(Entity, &LocalMap, &mut LocalMapRender, &DroneMaterial), With<Drone>>,
 ) {
     let Some(assets) = assets else {
         return;
@@ -48,13 +48,14 @@ pub fn sync_local_maps(
     let s = config.voxel_size;
     let half = Vec3::splat(s * 0.5);
 
-    for (local_map, mut render, material) in &mut drones_q {
+    for (drone_entity, local_map, mut render, material) in &mut drones_q {
         for (cell, state) in local_map.0.iter_known() {
             if state == CellState::Occupied && !render.spawned.contains_key(&cell) {
                 let position = cell.as_vec3() * s + half;
                 let entity = commands
                     .spawn((
                         LocalMapVoxel,
+                        OwnedByDrone(drone_entity),
                         Mesh3d(assets.cube.clone()),
                         MeshMaterial3d(material.0.clone()),
                         Transform::from_translation(position),

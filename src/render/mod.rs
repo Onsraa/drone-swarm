@@ -1,4 +1,5 @@
 mod assets;
+mod cleanup;
 mod components;
 mod constants;
 mod global_map;
@@ -11,6 +12,7 @@ use bevy::prelude::*;
 pub use components::{GlobalMapVoxel, GroundTruthVoxel, LocalMapVoxel};
 
 use assets::init_voxel_assets;
+use cleanup::cleanup_orphan_local_voxels;
 use global_map::sync_global_map;
 use ground_truth::spawn_ground_truth_voxels;
 use local_map::{ensure_local_render, sync_local_maps};
@@ -30,7 +32,13 @@ impl Plugin for VoxelRenderPlugin {
             )
             .add_systems(
                 Update,
-                (ensure_local_render, sync_local_maps, sync_global_map).chain(),
+                (
+                    ensure_local_render,
+                    sync_local_maps,
+                    sync_global_map,
+                    cleanup_orphan_local_voxels,
+                )
+                    .chain(),
             );
     }
 }

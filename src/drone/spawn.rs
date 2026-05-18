@@ -12,30 +12,41 @@ use crate::world::WorldConfig;
 
 use super::components::{Drone, DroneColor, DroneId, PendingCenter, WanderTarget, WanderTimer};
 use super::constants::{
-    DEFAULT_DRONE_COUNT, DRONE_COLOR_ALPHA, DRONE_COLOR_LIGHTNESS, DRONE_COLOR_SATURATION,
-    DRONE_GLB_PATH, DRONE_HUE_STEP_DEGREES, DRONE_SCALE, DRONE_SPAWN_RADIUS_METERS,
-    MODEL_YAW_OFFSET_RADIANS, RANDOM_DIR_MIN_LENGTH, WANDER_CHANGE_INTERVAL_SECS,
+    DRONE_COLOR_ALPHA, DRONE_COLOR_LIGHTNESS, DRONE_COLOR_SATURATION, DRONE_GLB_PATH,
+    DRONE_HUE_STEP_DEGREES, DRONE_SCALE, DRONE_SPAWN_RADIUS_METERS, MODEL_YAW_OFFSET_RADIANS,
+    RANDOM_DIR_MIN_LENGTH, WANDER_CHANGE_INTERVAL_SECS,
 };
+use super::resources::DroneSpawnConfig;
 
-pub fn spawn_drones(
+/// Each frame, if the drone count doesn't match `DroneSpawnConfig.target_count`,
+/// despawn all current drones and respawn fresh ones. Cube cleanup of each
+/// drone's local-map cubes is handled by the render module via removal
+/// events, so this system only needs to manage drone entities themselves.
+pub fn respawn_drones_if_needed(
     mut commands: Commands,
+    spawn_config: Res<DroneSpawnConfig>,
+    world: Res<WorldConfig>,
     asset_server: Res<AssetServer>,
-    config: Res<WorldConfig>,
+    drones_q: Query<Entity, With<Drone>>,
 ) {
-    let world_center = config.center();
-    for id in 0..DEFAULT_DRONE_COUNT {
-        let spawn_pos = ring_position(world_center, id, DEFAULT_DRONE_COUNT);
-        let color = drone_color(id);
-        spawn_one_drone(
-            &mut commands,
-            &asset_server,
-            id,
-            spawn_pos,
-            color,
-            config.size,
-        );
+    let current_count = drones_q.iter().count() as u32;
+    if current_count == spawn_config.target_count {
+        return;
     }
-    info!("spawned {} drones", DEFAULT_DRONE_COUNT);
+    for entity in &drones_q {
+        commands.entity(entity).despawn();
+    }
+    let world_center = world.center();
+    let target = spawn_config.target_count;
+    for id in 0..target {
+        let spawn_pos = ring_position(world_center, id, target);
+        let color = drone_color(id);
+        spawn_one_drone(&mut commands, &asset_server, id, spawn_pos, color, world.size);
+    }
+    info!(
+        "respawned drones: {} -> {}",
+        current_count, spawn_config.target_count
+    );
 }
 
 fn spawn_one_drone(
