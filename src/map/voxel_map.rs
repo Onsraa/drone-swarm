@@ -39,8 +39,8 @@ impl VoxelMap {
             .unwrap_or(CellState::Unknown)
     }
 
-    /// Upgrade rule: `Occupied` is sticky; `Free` overrides `Unknown` only.
-    /// Prevents transient ray-misses from erasing a previously-detected wall.
+    /// `Occupied` is sticky; `Free` overrides `Unknown` only. Prevents transient
+    /// ray-misses from erasing a previously-detected wall.
     pub fn upgrade(&mut self, p: IVec3, observed: CellState) {
         let Some(i) = self.idx(p) else {
             return;
@@ -78,6 +78,3 @@ impl VoxelMap {
             })
     }
 }
-
-#[derive(Component)]
-pub struct LocalMap(pub VoxelMap);
