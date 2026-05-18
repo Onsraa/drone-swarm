@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-
 use bevy::prelude::*;
 
+/// Handle to the single global-map mesh asset. Lazily populated by
+/// `sync_global_map` once the GlobalMap resource exists.
 #[derive(Resource, Default)]
 pub struct GlobalMapRender {
-    pub spawned: HashMap<IVec3, Entity>,
+    pub handle: Option<Handle<Mesh>>,
 }

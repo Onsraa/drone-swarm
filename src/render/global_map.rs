@@ -5,10 +5,14 @@ use crate::world::WorldConfig;
 
 use super::assets::VoxelAssets;
 use super::components::GlobalMapVoxel;
+use super::mesh_builder::{build_voxel_chunk_mesh, empty_voxel_mesh};
 use super::resources::GlobalMapRender;
 
+/// One chunk mesh for the entire global map. Rebuilt only on frames when
+/// the `GlobalMap` resource was written to (i.e. merge ticks).
 pub fn sync_global_map(
     mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
     assets: Option<Res<VoxelAssets>>,
     config: Res<WorldConfig>,
     global: Option<Res<GlobalMap>>,
@@ -17,21 +21,36 @@ pub fn sync_global_map(
     let (Some(assets), Some(global)) = (assets, global) else {
         return;
     };
-    let s = config.voxel_size;
-    let half = Vec3::splat(s * 0.5);
+    if !global.is_changed() && render.handle.is_some() {
+        return;
+    }
 
-    for (cell, state) in global.0.iter_known() {
-        if state == CellState::Occupied && !render.spawned.contains_key(&cell) {
-            let position = cell.as_vec3() * s + half;
-            let entity = commands
-                .spawn((
-                    GlobalMapVoxel,
-                    Mesh3d(assets.cube.clone()),
-                    MeshMaterial3d(assets.global_occupied_mat.clone()),
-                    Transform::from_translation(position),
-                ))
-                .id();
-            render.spawned.insert(cell, entity);
+    let occupied: Vec<IVec3> = global
+        .0
+        .iter_known()
+        .filter_map(|(cell, state)| (state == CellState::Occupied).then_some(cell))
+        .collect();
+    let mesh = if occupied.is_empty() {
+        empty_voxel_mesh()
+    } else {
+        build_voxel_chunk_mesh(occupied, config.voxel_size)
+    };
+
+    match render.handle.as_ref() {
+        Some(handle) => {
+            if let Some(asset) = meshes.get_mut(handle) {
+                *asset = mesh;
+            }
+        }
+        None => {
+            let handle = meshes.add(mesh);
+            commands.spawn((
+                GlobalMapVoxel,
+                Mesh3d(handle.clone()),
+                MeshMaterial3d(assets.global_occupied_mat.clone()),
+                Transform::IDENTITY,
+            ));
+            render.handle = Some(handle);
         }
     }
 }

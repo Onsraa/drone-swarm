@@ -5,6 +5,7 @@ mod constants;
 mod global_map;
 mod ground_truth;
 mod local_map;
+mod mesh_builder;
 mod resources;
 
 use bevy::prelude::*;
