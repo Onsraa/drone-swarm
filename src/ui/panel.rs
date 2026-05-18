@@ -1,3 +1,4 @@
+use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -13,12 +14,19 @@ pub fn draw_ui(
     mut spawn_config: ResMut<DroneSpawnConfig>,
     drones_q: Query<&LocalMap, With<Drone>>,
     global_map: Option<Res<GlobalMap>>,
+    diagnostics: Res<DiagnosticsStore>,
 ) -> Result {
+    let fps = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FPS)
+        .and_then(|d| d.smoothed())
+        .unwrap_or(0.0);
+
     let ctx = contexts.ctx_mut()?;
     egui::SidePanel::right("side_panel")
         .default_width(SIDE_PANEL_DEFAULT_WIDTH)
         .show(ctx, |ui| {
             ui.heading("Drones — Phase 5");
+            ui.label(format!("FPS: {:.0}", fps));
             ui.separator();
 
             ui.label("Layers");

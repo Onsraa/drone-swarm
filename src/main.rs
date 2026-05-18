@@ -1,3 +1,4 @@
+use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
 
@@ -27,6 +28,7 @@ use world::WorldPlugin;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(EguiPlugin::default())
         .add_plugins(WorldPlugin)
         .add_plugins(LightingPlugin)
