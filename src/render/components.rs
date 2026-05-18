@@ -15,3 +15,6 @@ pub struct GlobalMapVoxel;
 pub struct LocalMapRender {
     pub spawned: HashMap<IVec3, Entity>,
 }
+
+#[derive(Component)]
+pub struct DroneMaterial(pub Handle<StandardMaterial>);

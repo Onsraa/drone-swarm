@@ -4,6 +4,16 @@ pub const DRONE_SCALE: f32 = 0.1;
 pub const RANDOM_DIR_MIN_LENGTH: f32 = 0.1;
 pub const DRONE_GLB_PATH: &str = "models/drone.glb";
 
+pub const DEFAULT_DRONE_COUNT: u32 = 3;
+/// Horizontal radius (meters) of the spawn ring around the world center.
+pub const DRONE_SPAWN_RADIUS_METERS: f32 = 5.0;
+/// Golden-angle-in-degrees offset between consecutive drone hues so 50+
+/// drones still get well-spaced, perceptually distinct colors.
+pub const DRONE_HUE_STEP_DEGREES: f32 = 137.508;
+pub const DRONE_COLOR_SATURATION: f32 = 0.85;
+pub const DRONE_COLOR_LIGHTNESS: f32 = 0.55;
+pub const DRONE_COLOR_ALPHA: f32 = 0.85;
+
 /// Yaw offset applied to the SceneRoot child so the GLB's authored forward
 /// axis aligns with Bevy's body forward (-Z). The current drone.glb is
 /// modeled with +Z as forward; this rotates it 180 deg around Y.

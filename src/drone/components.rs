@@ -8,6 +8,9 @@ pub struct Drone;
 pub struct DroneId(pub u32);
 
 #[derive(Component)]
+pub struct DroneColor(pub Color);
+
+#[derive(Component)]
 pub struct WanderTimer(pub Timer);
 
 #[derive(Component, Default)]
