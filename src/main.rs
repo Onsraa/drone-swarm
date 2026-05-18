@@ -7,6 +7,7 @@ mod drone;
 mod lidar;
 mod lighting;
 mod map;
+mod merge;
 mod physics;
 mod render;
 mod ui;
@@ -17,6 +18,7 @@ use debug::DebugPlugin;
 use drone::DronePlugin;
 use lidar::LidarPlugin;
 use lighting::LightingPlugin;
+use merge::MergePlugin;
 use physics::PhysicsPlugin;
 use render::VoxelRenderPlugin;
 use ui::UiPlugin;
@@ -32,6 +34,7 @@ fn main() {
         .add_plugins(PhysicsPlugin)
         .add_plugins(DronePlugin)
         .add_plugins(LidarPlugin)
+        .add_plugins(MergePlugin)
         .add_plugins(OrbitCameraPlugin)
         .add_plugins(UiPlugin)
         .add_plugins(DebugPlugin)

@@ -10,3 +10,11 @@ pub const LOCAL_OCCUPIED_EMISSIVE: LinearRgba = LinearRgba {
     blue: 0.0,
     alpha: 1.0,
 };
+
+pub const GLOBAL_OCCUPIED_BASE_COLOR: Color = Color::srgba(0.1, 0.85, 1.0, 0.7);
+pub const GLOBAL_OCCUPIED_EMISSIVE: LinearRgba = LinearRgba {
+    red: 0.0,
+    green: 0.4,
+    blue: 0.5,
+    alpha: 1.0,
+};
