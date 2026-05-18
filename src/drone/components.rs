@@ -8,10 +8,10 @@ pub struct Drone;
 pub struct DroneId(pub u32);
 
 #[derive(Component)]
-pub struct Velocity(pub Vec3);
+pub struct WanderTimer(pub Timer);
 
-#[derive(Component)]
-pub struct WalkTimer(pub Timer);
+#[derive(Component, Default)]
+pub struct WanderTarget(pub Vec3);
 
 /// Marker on the SceneRoot child while waiting for GLB meshes to load.
 /// Once meshes resolve, the centering system shifts this entity by

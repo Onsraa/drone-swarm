@@ -4,12 +4,12 @@ use rand::{Rng, RngExt};
 
 use crate::lidar::LastScanRays;
 use crate::map::{LocalMap, VoxelMap};
+use crate::physics::{DesiredAttitude, DesiredVelocity, LinearVelocity, ThrustState};
 use crate::world::WorldConfig;
 
-use super::components::{Drone, DroneId, PendingCenter, Velocity, WalkTimer};
+use super::components::{Drone, DroneId, PendingCenter, WanderTarget, WanderTimer};
 use super::constants::{
-    DRONE_GLB_PATH, DRONE_SCALE, DRONE_SPEED_METERS_PER_SEC, RANDOM_DIR_MIN_LENGTH,
-    WALK_CHANGE_INTERVAL_SECS,
+    DRONE_GLB_PATH, DRONE_SCALE, RANDOM_DIR_MIN_LENGTH, WANDER_CHANGE_INTERVAL_SECS,
 };
 
 pub fn spawn_drone(
@@ -18,18 +18,20 @@ pub fn spawn_drone(
     config: Res<WorldConfig>,
 ) {
     let spawn_pos = config.center();
-    let mut rng = rand::rng();
-    let initial_dir = random_unit_dir(&mut rng);
 
     commands
         .spawn((
             Drone,
             DroneId(0),
-            Velocity(initial_dir * DRONE_SPEED_METERS_PER_SEC),
-            WalkTimer(Timer::from_seconds(
-                WALK_CHANGE_INTERVAL_SECS,
+            LinearVelocity::default(),
+            DesiredVelocity::default(),
+            ThrustState::default(),
+            DesiredAttitude::default(),
+            WanderTimer(Timer::from_seconds(
+                WANDER_CHANGE_INTERVAL_SECS,
                 TimerMode::Repeating,
             )),
+            WanderTarget::default(),
             Transform::from_translation(spawn_pos).with_scale(Vec3::splat(DRONE_SCALE)),
             Visibility::default(),
             LocalMap(VoxelMap::new(config.size)),
