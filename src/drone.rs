@@ -28,6 +28,8 @@ impl Plugin for DronePlugin {
 const DRONE_SPEED: f32 = 3.0;
 const WALK_CHANGE_INTERVAL: f32 = 2.0;
 const BOUND_MARGIN: f32 = 1.5;
+const DRONE_SCALE: f32 = 0.1;
+const ROTATION_LERP: f32 = 6.0;
 
 fn spawn_drone(mut commands: Commands, asset_server: Res<AssetServer>, config: Res<WorldConfig>) {
     let world_size = config.world_size();
@@ -45,7 +47,7 @@ fn spawn_drone(mut commands: Commands, asset_server: Res<AssetServer>, config: R
             TimerMode::Repeating,
         )),
         SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/drone.glb"))),
-        Transform::from_translation(pos),
+        Transform::from_translation(pos).with_scale(Vec3::splat(DRONE_SCALE)),
     ));
     info!("spawned drone 0 at {:?}", pos);
 }
@@ -92,10 +94,13 @@ fn integrate_motion(
         t.translation = Vec3::new(px, py, pz);
         v.0 = Vec3::new(vx, vy, vz);
 
-        // Face direction of motion (Y is up).
+        // Smoothly face direction of motion (Y is up). Slerp avoids snap on velocity flips.
         let dir = v.0.normalize_or_zero();
         if dir.length_squared() > 0.0 {
-            t.look_to(dir, Vec3::Y);
+            let mut target = *t;
+            target.look_to(dir, Vec3::Y);
+            let alpha = (ROTATION_LERP * dt).min(1.0);
+            t.rotation = t.rotation.slerp(target.rotation, alpha);
         }
     }
 }
