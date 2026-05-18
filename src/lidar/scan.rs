@@ -5,9 +5,9 @@ use crate::map::{CellState, LocalMap, VoxelMap};
 use crate::world::{GroundTruthMap, WorldConfig};
 
 use super::components::LastScanRays;
-use super::constants::{MAX_RANGE_METERS, RAYS_PER_SCAN};
+use super::constants::MAX_RANGE_METERS;
 use super::resources::ScanTimer;
-use super::sampling::fibonacci_sphere;
+use super::sampling::LidarRayDirs;
 use super::traversal::voxel_traverse;
 
 pub fn lidar_scan(
@@ -15,21 +15,21 @@ pub fn lidar_scan(
     mut timer: ResMut<ScanTimer>,
     config: Res<WorldConfig>,
     ground: Res<GroundTruthMap>,
+    dirs: Res<LidarRayDirs>,
     mut drones_q: Query<(&Transform, &mut LocalMap, Option<&mut LastScanRays>), With<Drone>>,
 ) {
     timer.0.tick(time.delta());
     if !timer.0.just_finished() {
         return;
     }
-    let dirs = fibonacci_sphere(RAYS_PER_SCAN);
     let voxel_size = config.voxel_size;
     let max_grid_steps = MAX_RANGE_METERS / voxel_size;
 
     for (transform, mut local, rays_opt) in &mut drones_q {
         let origin_world = transform.translation;
         let origin_grid = origin_world / voxel_size;
-        let mut hits: Vec<(Vec3, Vec3)> = Vec::with_capacity(dirs.len());
-        for &dir in &dirs {
+        let mut hits: Vec<(Vec3, Vec3)> = Vec::with_capacity(dirs.0.len());
+        for &dir in &dirs.0 {
             let end_cell = cast_ray(origin_grid, dir, max_grid_steps, &ground, &mut local.0);
             let end_world = (end_cell.as_vec3() + Vec3::splat(0.5)) * voxel_size;
             hits.push((origin_world, end_world));

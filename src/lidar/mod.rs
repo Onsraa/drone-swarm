@@ -11,6 +11,7 @@ pub use components::LastScanRays;
 
 use constants::SCAN_INTERVAL_SECS;
 use resources::ScanTimer;
+use sampling::LidarRayDirs;
 use scan::lidar_scan;
 
 pub struct LidarPlugin;
@@ -21,6 +22,7 @@ impl Plugin for LidarPlugin {
             SCAN_INTERVAL_SECS,
             TimerMode::Repeating,
         )))
+        .insert_resource(LidarRayDirs::default_for_scan())
         .add_systems(Update, lidar_scan);
     }
 }
