@@ -24,10 +24,15 @@ pub fn recenter_visuals(
         ) else {
             continue;
         };
-        root_transform.translation = -model_center;
+        // Account for any rotation already on the SceneRoot (e.g. yaw offset
+        // that flips the GLB's authored forward axis). Translation lives in
+        // the parent frame, so we rotate the model-local center into that
+        // frame before negating it.
+        let center_in_parent_frame = root_transform.rotation * model_center;
+        root_transform.translation = -center_in_parent_frame;
         info!(
-            "recentered drone GLB: mesh center {:?} in scene-root local space",
-            model_center
+            "recentered drone GLB: mesh center {:?} (parent frame: {:?})",
+            model_center, center_in_parent_frame
         );
         commands.entity(root).remove::<PendingCenter>();
     }

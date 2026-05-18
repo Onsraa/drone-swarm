@@ -9,7 +9,8 @@ use crate::world::WorldConfig;
 
 use super::components::{Drone, DroneId, PendingCenter, WanderTarget, WanderTimer};
 use super::constants::{
-    DRONE_GLB_PATH, DRONE_SCALE, RANDOM_DIR_MIN_LENGTH, WANDER_CHANGE_INTERVAL_SECS,
+    DRONE_GLB_PATH, DRONE_SCALE, MODEL_YAW_OFFSET_RADIANS, RANDOM_DIR_MIN_LENGTH,
+    WANDER_CHANGE_INTERVAL_SECS,
 };
 
 pub fn spawn_drone(
@@ -40,7 +41,7 @@ pub fn spawn_drone(
         .with_children(|parent| {
             parent.spawn((
                 SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(DRONE_GLB_PATH))),
-                Transform::default(),
+                Transform::from_rotation(Quat::from_rotation_y(MODEL_YAW_OFFSET_RADIANS)),
                 PendingCenter,
             ));
         });
