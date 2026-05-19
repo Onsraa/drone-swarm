@@ -1,6 +1,10 @@
 // Frontier scan + clustering
 pub const FRONTIER_REACHED_DIST: f32 = 6.0;
-pub const MAX_FRONTIER_CANDIDATES: usize = 50_000;
+/// Cap on candidate cells the time-sliced frontier scan collects in a
+/// single sweep. Smaller cap = cheaper `build_clusters` finalize spike
+/// (the per-cell flood-fill scales linearly). 5 K cells is plenty for
+/// the assignment + crowding signal at typical exploration densities.
+pub const MAX_FRONTIER_CANDIDATES: usize = 5_000;
 pub const MIN_CLUSTER_SIZE: usize = 4;
 
 // Planner

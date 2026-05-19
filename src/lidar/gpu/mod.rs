@@ -353,7 +353,18 @@ fn spawn_global_stats_readback(
         .observe(
             |event: On<ReadbackComplete>,
              mut stats: ResMut<GpuGlobalStats>,
-             mut mirror: ResMut<GpuGlobalOccupancyMirror>| {
+             mut mirror: ResMut<GpuGlobalOccupancyMirror>,
+             mut throttle: Local<u32>| {
+                // Throttle: only decode every 4th readback (~15 Hz at
+                // 60 FPS, ~30 Hz at 120 FPS). Skipping early avoids the
+                // 1.2 MB `to_shader_type` allocation entirely on the
+                // dropped firings. Downstream consumers (frontier
+                // scan, planner grid, reactive_avoid) tolerate the
+                // ~67 ms lag.
+                *throttle = throttle.wrapping_add(1);
+                if *throttle % 4 != 0 {
+                    return;
+                }
                 let data: Vec<u32> = event.to_shader_type();
                 // Bitwise + popcount decode: each u32 holds 16 cells,
                 // 2 bits each, even bits = Free flag, odd = Occupied.
@@ -363,7 +374,6 @@ fn spawn_global_stats_readback(
                 for &word in &data {
                     let occ_bits = word & 0xAAAAAAAA;
                     let free_bits = word & 0x55555555;
-                    // free wins only when occupied bit clear (occ_bits >> 1 == 0 at that pair).
                     let free_only = free_bits & !(occ_bits >> 1);
                     occupied += occ_bits.count_ones() as usize;
                     free += free_only.count_ones() as usize;
