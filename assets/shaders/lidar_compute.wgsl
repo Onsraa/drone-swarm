@@ -20,6 +20,19 @@ struct LidarParams {
 @group(0) @binding(3) var<storage, read> ray_dirs: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read_write> hits: array<u32>;
 @group(0) @binding(5) var<storage, read> drone_orientations: array<vec4<f32>>;
+@group(0) @binding(6) var<storage, read_write> local_occupancy: array<atomic<u32>>;
+
+// Per-drone occupancy is 2 bits per cell, 16 cells per u32.
+//   bit 0 = Free flag, bit 1 = Occupied flag.
+// Both flags are sticky under atomicOr; Unknown = 0b00.
+fn mark_cell_state(drone_idx: u32, flat: u32, state_bits: u32) {
+    let cells_per_drone = params.dims.x * params.dims.y * params.dims.z;
+    let words_per_drone = (cells_per_drone + 15u) / 16u;
+    let word_idx = drone_idx * words_per_drone + flat / 16u;
+    let bit_offset = (flat % 16u) * 2u;
+    let mask = state_bits << bit_offset;
+    atomicOr(&local_occupancy[word_idx], mask);
+}
 
 fn cell_flat_idx(cell: vec3<i32>) -> u32 {
     return u32(cell.x)
@@ -108,7 +121,12 @@ fn lidar(@builtin(global_invocation_id) gid: vec3<u32>) {
         let occupied = in_bounds && ground_is_occupied(cell);
         if (in_bounds) {
             let state: u32 = select(1u, 2u, occupied);
-            hits[out_base + step] = pack_entry(state, cell_flat_idx(cell));
+            let flat = cell_flat_idx(cell);
+            hits[out_base + step] = pack_entry(state, flat);
+            // Mirror the state into the per-drone occupancy SSBO. State
+            // bits land at `flat`'s 2-bit slot via atomicOr; Stage 9B's
+            // render pass reads this buffer instead of the CPU LocalMap.
+            mark_cell_state(drone_idx, flat, state);
         } else {
             hits[out_base + step] = 0u;
         }

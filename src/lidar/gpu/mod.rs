@@ -18,8 +18,8 @@ use dispatch::{add_compute_render_graph_node, prepare_lidar_bind_group};
 use pipeline::init_compute_lidar_pipeline;
 use resources::{
     setup_gpu_lidar_assets, DroneOrientationsBuffer, DronePositionsBuffer, GroundTruthBuffer,
-    LidarHitsBuffer, LidarParams, LidarParamsBuffer, PendingLidarHits, RayDirsBuffer,
-    MAX_DRONES_GPU, MAX_STEPS_PER_RAY,
+    LidarHitsBuffer, LidarParams, LidarParamsBuffer, LocalOccupancyBuffer, PendingLidarHits,
+    RayDirsBuffer, MAX_DRONES_GPU, MAX_STEPS_PER_RAY,
 };
 
 use super::constants::RAYS_PER_SCAN;
@@ -40,6 +40,7 @@ impl Plugin for GpuLidarPlugin {
             .add_plugins(ExtractResourcePlugin::<DroneOrientationsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<RayDirsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LidarHitsBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<LocalOccupancyBuffer>::default())
             .add_systems(
                 Update,
                 (

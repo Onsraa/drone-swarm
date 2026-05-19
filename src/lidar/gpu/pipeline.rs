@@ -37,6 +37,8 @@ pub fn init_compute_lidar_pipeline(
                 storage_buffer::<Vec<u32>>(false),
                 // 5: drone orientations (Vec<Vec4>, quaternion xyzw)
                 storage_buffer_read_only::<Vec<Vec4>>(false),
+                // 6: per-drone local-map occupancy (2 bits/cell, atomic)
+                storage_buffer::<Vec<u32>>(false),
             ),
         ),
     );

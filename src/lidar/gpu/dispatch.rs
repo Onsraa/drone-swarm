@@ -12,7 +12,7 @@ use bevy::render::storage::GpuShaderStorageBuffer;
 use super::pipeline::ComputeLidarPipeline;
 use super::resources::{
     DroneOrientationsBuffer, DronePositionsBuffer, GroundTruthBuffer, LidarHitsBuffer,
-    LidarParamsBuffer, RayDirsBuffer, MAX_DRONES_GPU,
+    LidarParamsBuffer, LocalOccupancyBuffer, RayDirsBuffer, MAX_DRONES_GPU,
 };
 use super::super::constants::RAYS_PER_SCAN;
 
@@ -30,6 +30,7 @@ pub fn prepare_lidar_bind_group(
     orientations: Res<DroneOrientationsBuffer>,
     dirs: Res<RayDirsBuffer>,
     hits: Res<LidarHitsBuffer>,
+    occupancy: Res<LocalOccupancyBuffer>,
     buffers: Res<RenderAssets<GpuShaderStorageBuffer>>,
 ) {
     let Some(ground_buf) = buffers.get(&ground.0) else { return; };
@@ -38,6 +39,7 @@ pub fn prepare_lidar_bind_group(
     let Some(orientations_buf) = buffers.get(&orientations.0) else { return; };
     let Some(dirs_buf) = buffers.get(&dirs.0) else { return; };
     let Some(hits_buf) = buffers.get(&hits.0) else { return; };
+    let Some(occupancy_buf) = buffers.get(&occupancy.0) else { return; };
 
     let bind_group = render_device.create_bind_group(
         "compute lidar bind group",
@@ -49,6 +51,7 @@ pub fn prepare_lidar_bind_group(
             dirs_buf.buffer.as_entire_buffer_binding(),
             hits_buf.buffer.as_entire_buffer_binding(),
             orientations_buf.buffer.as_entire_buffer_binding(),
+            occupancy_buf.buffer.as_entire_buffer_binding(),
         )),
     );
     commands.insert_resource(LidarBindGroup(bind_group));
