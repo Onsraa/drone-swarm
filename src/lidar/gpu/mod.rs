@@ -22,6 +22,8 @@ use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 
 use crate::comms::CommsState;
 use crate::drone::{Drone, DroneColor, DroneId};
+use crate::exploration::{Role, RoleParams};
+use crate::lidar::sampling::RoleConeRange;
 use crate::lidar::{LidarFrameCounter, LidarSettings};
 use crate::world::WorldConfig;
 
@@ -101,6 +103,8 @@ impl Plugin for GpuLidarPlugin {
                     upload_build_params_and_colors
                         .run_if(resource_exists::<BuildLocalParamsBuffer>),
                     upload_ray_dirs.run_if(resource_exists::<RayDirsBuffer>),
+                    upload_drone_scan_params
+                        .run_if(resource_exists::<DroneScanParamsBuffer>),
                     spawn_global_stats_readback
                         .run_if(resource_exists::<GlobalOccupancyBuffer>),
                 ),
@@ -286,6 +290,39 @@ fn upload_build_params_and_colors(
             connected_mask_hi: comms.connected_mask[1],
         };
         buf.set_data(params);
+    }
+}
+
+fn role_range(ranges: &[RoleConeRange; 3], role: Role) -> RoleConeRange {
+    ranges
+        .iter()
+        .find(|r| r.role == role)
+        .copied()
+        .expect("role missing from concatenated ray buffer")
+}
+
+fn upload_drone_scan_params(
+    mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
+    handle: Res<DroneScanParamsBuffer>,
+    ranges: Res<RoleConeRanges>,
+    drones: Query<(&DroneId, &Role), With<Drone>>,
+) {
+    let mut sorted: Vec<(u32, Role)> = drones.iter().map(|(id, r)| (id.0, *r)).collect();
+    sorted.sort_by_key(|(id, _)| *id);
+    let max = MAX_DRONES_GPU as usize;
+    let mut out = vec![DroneScanParams::default(); max];
+    for (i, (_, role)) in sorted.iter().take(max).enumerate() {
+        let p = RoleParams::for_role(*role);
+        let r = role_range(&ranges.0, *role);
+        out[i] = DroneScanParams {
+            ray_offset: r.offset,
+            ray_count: r.count.min(p.rays_per_scan),
+            max_steps: p.max_range_cells,
+            scan_interval: p.scan_interval_frames,
+        };
+    }
+    if let Some(buf) = buffers.get_mut(&handle.0) {
+        buf.set_data(out);
     }
 }
 
