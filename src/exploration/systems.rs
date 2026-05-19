@@ -18,25 +18,37 @@ use super::planner::plan;
 use super::resources::{FrontierClusters, PlannerGrid};
 use super::steering::{pure_pursuit, reactive_force};
 use super::scoring::{crowding_for, score, ScoringWeights};
+use super::role::{Role, RoleParams};
 use rand::RngExt;
 
 pub fn assign_targets(
     clusters: Res<FrontierClusters>,
     comms: Res<CommsState>,
-    mut q: Query<(&DroneId, &Transform, &mut FrontierTarget), With<Drone>>,
+    mut q: Query<(&DroneId, &Transform, &Role, &mut FrontierTarget), With<Drone>>,
 ) {
     if clusters.entries.is_empty() {
         return;
     }
     // Snapshot peer positions + targets keyed by id for crowding lookups.
+    // Role is not needed for peer crowding — only position + cluster_id matter.
     let peers: Vec<(u32, Vec3, Option<u32>)> = q
         .iter()
-        .map(|(id, t, ft)| (id.0, t.translation, ft.cluster_id))
+        .map(|(id, t, _role, ft)| (id.0, t.translation, ft.cluster_id))
         .collect();
 
-    let weights = ScoringWeights::default();
+    for (id, transform, role, mut target) in &mut q {
+        // Anchors hold position; supervisor assigns them — skip scoring.
+        if *role == Role::Anchor {
+            continue;
+        }
 
-    for (id, transform, mut target) in &mut q {
+        let role_params = RoleParams::for_role(*role);
+        let weights = ScoringWeights {
+            info: role_params.info_weight,
+            distance: role_params.distance_weight,
+            distance_bias: role_params.distance_bias,
+            crowding: role_params.crowding_weight,
+        };
         let drone_pos = transform.translation;
         // Filter peers to the comms cluster of the deciding drone.
         let half = (id.0 >= 32) as usize;
