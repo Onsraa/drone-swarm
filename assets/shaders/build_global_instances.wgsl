@@ -20,7 +20,7 @@ struct BuildParams {
 @group(0) @binding(3) var<storage, read_write> instance_buffer: array<vec4<f32>>;
 
 const GLOBAL_COLOR: vec4<f32> = vec4<f32>(0.1, 0.85, 1.0, 0.7);
-const GLOBAL_SCALE_FACTOR: f32 = 1.01;
+const GLOBAL_SCALE_FACTOR: f32 = 0.15;
 // Max instances the buffer holds (matches the CPU-side allocation).
 const GLOBAL_MAX_INSTANCES: u32 = 1000000u;
 
