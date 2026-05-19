@@ -10,35 +10,42 @@ use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::storage::GpuShaderStorageBuffer;
 
 use super::pipeline::ComputeLidarPipeline;
-use super::resources::{GroundTruthBuffer, LidarCountBuffer};
+use super::resources::{
+    DronePositionsBuffer, GroundTruthBuffer, LidarHitsBuffer, LidarParamsBuffer, RayDirsBuffer,
+    MAX_DRONES_GPU,
+};
+use super::super::constants::RAYS_PER_SCAN;
 
 #[derive(Resource)]
 pub struct LidarBindGroup(pub BindGroup);
 
-/// Builds the bind group once both storage buffers exist on the GPU.
-/// Runs every frame but the resource-existence guard makes it a one-shot
-/// in practice — only re-fires if `LidarBindGroup` gets removed.
 pub fn prepare_lidar_bind_group(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline: Res<ComputeLidarPipeline>,
     pipeline_cache: Res<PipelineCache>,
     ground: Res<GroundTruthBuffer>,
-    output: Res<LidarCountBuffer>,
+    params: Res<LidarParamsBuffer>,
+    positions: Res<DronePositionsBuffer>,
+    dirs: Res<RayDirsBuffer>,
+    hits: Res<LidarHitsBuffer>,
     buffers: Res<RenderAssets<GpuShaderStorageBuffer>>,
 ) {
-    let Some(ground_buf) = buffers.get(&ground.0) else {
-        return;
-    };
-    let Some(output_buf) = buffers.get(&output.0) else {
-        return;
-    };
+    let Some(ground_buf) = buffers.get(&ground.0) else { return; };
+    let Some(params_buf) = buffers.get(&params.0) else { return; };
+    let Some(positions_buf) = buffers.get(&positions.0) else { return; };
+    let Some(dirs_buf) = buffers.get(&dirs.0) else { return; };
+    let Some(hits_buf) = buffers.get(&hits.0) else { return; };
+
     let bind_group = render_device.create_bind_group(
         "compute lidar bind group",
         &pipeline_cache.get_bind_group_layout(&pipeline.layout),
         &BindGroupEntries::sequential((
             ground_buf.buffer.as_entire_buffer_binding(),
-            output_buf.buffer.as_entire_buffer_binding(),
+            params_buf.buffer.as_entire_buffer_binding(),
+            positions_buf.buffer.as_entire_buffer_binding(),
+            dirs_buf.buffer.as_entire_buffer_binding(),
+            hits_buf.buffer.as_entire_buffer_binding(),
         )),
     );
     commands.insert_resource(LidarBindGroup(bind_group));
@@ -62,36 +69,20 @@ impl render_graph::Node for ComputeLidarNode {
         let Some(bind_group) = world.get_resource::<LidarBindGroup>() else {
             return Ok(());
         };
-        let Some(output_handle) = world.get_resource::<LidarCountBuffer>() else {
-            return Ok(());
-        };
-        let Some(buffers) = world.get_resource::<RenderAssets<GpuShaderStorageBuffer>>() else {
-            return Ok(());
-        };
-        let Some(output_buf) = buffers.get(&output_handle.0) else {
-            return Ok(());
-        };
         let Some(compute_pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) else {
             return Ok(());
         };
-        let ground_handle = world.resource::<GroundTruthBuffer>();
-        let Some(ground_buf) = buffers.get(&ground_handle.0) else {
-            return Ok(());
-        };
-        let bitset_words = (ground_buf.buffer.size() / 4) as u32;
 
         let encoder = render_context.command_encoder();
-        encoder.clear_buffer(&output_buf.buffer, 0, None);
-        {
-            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                label: Some("compute lidar count pass"),
-                ..default()
-            });
-            pass.set_bind_group(0, &bind_group.0, &[]);
-            pass.set_pipeline(compute_pipeline);
-            let workgroups = bitset_words.div_ceil(64).max(1);
-            pass.dispatch_workgroups(workgroups, 1, 1);
-        }
+        let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+            label: Some("compute lidar pass"),
+            ..default()
+        });
+        pass.set_bind_group(0, &bind_group.0, &[]);
+        pass.set_pipeline(compute_pipeline);
+        let group_x = MAX_DRONES_GPU.div_ceil(8);
+        let group_y = (RAYS_PER_SCAN as u32).div_ceil(8);
+        pass.dispatch_workgroups(group_x, group_y, 1);
         Ok(())
     }
 }

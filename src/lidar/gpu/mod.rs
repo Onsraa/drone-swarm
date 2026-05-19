@@ -7,32 +7,36 @@ use bevy::render::extract_resource::ExtractResourcePlugin;
 use bevy::render::gpu_readback::{Readback, ReadbackComplete};
 use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 
-use dispatch::{
-    add_compute_render_graph_node, prepare_lidar_bind_group, LidarBindGroup,
-};
+use dispatch::{add_compute_render_graph_node, prepare_lidar_bind_group, LidarBindGroup};
 use pipeline::init_compute_lidar_pipeline;
-use resources::{upload_ground_truth_to_gpu, GroundTruthBuffer, LidarCountBuffer};
+use resources::{
+    setup_gpu_lidar_assets, DronePositionsBuffer, GroundTruthBuffer, LidarHitsBuffer,
+    LidarParamsBuffer, RayDirsBuffer,
+};
 
-/// Mirrors the ground-truth map onto the GPU as a packed `u32` bitset and
-/// runs a sanity compute pass that counts its set bits each frame. The
-/// count is read back via Bevy's `Readback` component; the first non-zero
-/// reading is logged once and the entity despawns to stop further reads.
-///
-/// Foundation for Tier 3 #8: subsequent stages swap the count shader for
-/// Amanatides-Woo lidar traversal while reusing the same bind-group shape.
+use super::constants::RAYS_PER_SCAN;
+use resources::MAX_STEPS_PER_RAY;
+
+/// Stage 3: GPU lidar with stub one-drone input. WGSL Amanatides-Woo
+/// writes per-(drone, ray) hit trails into the hits storage buffer.
+/// Stage 4 will swap the stub for per-tick drone uploads and feed the
+/// hits back into `LocalMap` via `upgrade()`.
 pub struct GpuLidarPlugin;
 
 impl Plugin for GpuLidarPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(ExtractResourcePlugin::<GroundTruthBuffer>::default())
-            .add_plugins(ExtractResourcePlugin::<LidarCountBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<LidarParamsBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<DronePositionsBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<RayDirsBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<LidarHitsBuffer>::default())
             .add_systems(
                 Update,
                 (
-                    upload_ground_truth_to_gpu
+                    setup_gpu_lidar_assets
                         .run_if(resource_exists::<crate::world::GroundTruthMap>)
                         .run_if(not(resource_exists::<GroundTruthBuffer>)),
-                    observe_count_readback.run_if(resource_exists::<LidarCountBuffer>),
+                    observe_lidar_readback.run_if(resource_exists::<LidarHitsBuffer>),
                 ),
             );
 
@@ -53,11 +57,11 @@ impl Plugin for GpuLidarPlugin {
     }
 }
 
-/// Spawn the Readback entity after the count buffer exists. Logs the
-/// first non-zero reading, then despawns so we don't keep polling.
-fn observe_count_readback(
+/// Stage-3 sanity readback. Spawns a `Readback` on the hits buffer, logs
+/// the first ray's trail of the first drone, then despawns itself.
+fn observe_lidar_readback(
     mut commands: Commands,
-    count: Res<LidarCountBuffer>,
+    hits: Res<LidarHitsBuffer>,
     mut spawned: Local<bool>,
 ) {
     if *spawned {
@@ -65,16 +69,43 @@ fn observe_count_readback(
     }
     *spawned = true;
     commands
-        .spawn(Readback::buffer(count.0.clone()))
+        .spawn(Readback::buffer(hits.0.clone()))
         .observe(|event: On<ReadbackComplete>, mut commands: Commands| {
             let data: Vec<u32> = event.to_shader_type();
-            if data.first().copied().unwrap_or(0) == 0 {
+            // Skip frames where the buffer is still all-zeros.
+            if data.iter().take(MAX_STEPS_PER_RAY as usize).all(|&v| v == 0) {
                 return;
             }
-            info!(
-                "compute lidar sanity: GPU counted {} set bits in the ground-truth bitset",
-                data[0]
-            );
+            describe_first_ray(&data);
             commands.entity(event.entity).despawn();
         });
+}
+
+fn describe_first_ray(data: &[u32]) {
+    let max_steps = MAX_STEPS_PER_RAY as usize;
+    let ray_count = RAYS_PER_SCAN;
+    let mut log = String::from("GPU lidar stub: drone 0 trails:");
+    for ray in 0..3.min(ray_count) {
+        let base = ray * max_steps;
+        log.push_str(&format!("\n  ray {}: ", ray));
+        for step in 0..max_steps {
+            let entry = data[base + step];
+            if entry == 0 {
+                log.push_str(&format!("[end at step {}]", step));
+                break;
+            }
+            let state = entry >> 30;
+            let flat = entry & 0x3FFFFFFF;
+            let tag = match state {
+                1 => "F",
+                2 => "O",
+                _ => "?",
+            };
+            log.push_str(&format!("{}{} ", tag, flat));
+            if state == 2 {
+                break;
+            }
+        }
+    }
+    info!("{}", log);
 }

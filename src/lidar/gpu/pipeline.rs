@@ -5,6 +5,8 @@ use bevy::render::render_resource::{
     ComputePipelineDescriptor, PipelineCache, ShaderStages,
 };
 
+use super::resources::LidarParams;
+
 const SHADER_ASSET_PATH: &str = "shaders/lidar_compute.wgsl";
 
 #[derive(Resource)]
@@ -23,7 +25,15 @@ pub fn init_compute_lidar_pipeline(
         &BindGroupLayoutEntries::sequential(
             ShaderStages::COMPUTE,
             (
+                // 0: ground-truth bitset
                 storage_buffer_read_only::<Vec<u32>>(false),
+                // 1: lidar params (single struct)
+                storage_buffer_read_only::<LidarParams>(false),
+                // 2: drone positions (Vec<Vec4>)
+                storage_buffer_read_only::<Vec<Vec4>>(false),
+                // 3: ray dirs (Vec<Vec4>)
+                storage_buffer_read_only::<Vec<Vec4>>(false),
+                // 4: hits output
                 storage_buffer::<Vec<u32>>(false),
             ),
         ),
@@ -33,7 +43,7 @@ pub fn init_compute_lidar_pipeline(
         label: Some("compute lidar".into()),
         layout: vec![layout.clone()],
         shader,
-        entry_point: Some("count".into()),
+        entry_point: Some("lidar".into()),
         ..default()
     });
     commands.insert_resource(ComputeLidarPipeline { layout, pipeline });
