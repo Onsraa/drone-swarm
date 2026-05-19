@@ -1,7 +1,6 @@
 mod assets;
 mod components;
 pub mod constants;
-mod global_map;
 mod gpu_global_map;
 mod gpu_local_map;
 mod ground_truth;
@@ -32,8 +31,5 @@ impl Plugin for VoxelRenderPlugin {
                     spawn_ground_truth_layer.after(init_voxel_assets),
                 ),
             );
-        // CPU sync_local_maps was retired in 9D; sync_global_map retires
-        // here in 9Eb. Ground truth is the only static CPU layer left.
-        let _ = &global_map::sync_global_map;
     }
 }

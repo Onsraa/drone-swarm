@@ -5,7 +5,6 @@ pub struct UiState {
     pub show_ground_truth: bool,
     pub show_local_maps: bool,
     pub show_global_map: bool,
-    pub show_rays: bool,
 }
 
 impl Default for UiState {
@@ -14,7 +13,6 @@ impl Default for UiState {
             show_ground_truth: false,
             show_local_maps: true,
             show_global_map: false,
-            show_rays: false,
         }
     }
 }

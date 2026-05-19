@@ -5,8 +5,6 @@ use bevy::gltf::GltfAssetLabel;
 use bevy::prelude::*;
 use rand::{Rng, RngExt};
 
-use crate::lidar::LastScanRays;
-use crate::map::{LocalMap, VoxelMap};
 use crate::physics::{DesiredAttitude, DesiredVelocity, LinearVelocity, ThrustState};
 use crate::world::WorldConfig;
 
@@ -41,7 +39,7 @@ pub fn respawn_drones_if_needed(
     for id in 0..target {
         let spawn_pos = ring_position(world_center, id, target);
         let color = drone_color(id);
-        spawn_one_drone(&mut commands, &asset_server, id, spawn_pos, color, world.size);
+        spawn_one_drone(&mut commands, &asset_server, id, spawn_pos, color);
     }
     info!(
         "respawned drones: {} -> {}",
@@ -55,7 +53,6 @@ fn spawn_one_drone(
     id: u32,
     spawn_pos: Vec3,
     color: Color,
-    map_dims: UVec3,
 ) {
     commands
         .spawn((
@@ -73,8 +70,6 @@ fn spawn_one_drone(
             WanderTarget::default(),
             Transform::from_translation(spawn_pos).with_scale(Vec3::splat(DRONE_SCALE)),
             Visibility::default(),
-            LocalMap(VoxelMap::new(map_dims)),
-            LastScanRays::default(),
         ))
         .with_children(|parent| {
             parent.spawn((

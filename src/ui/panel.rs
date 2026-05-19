@@ -4,7 +4,6 @@ use bevy_egui::{egui, EguiContexts};
 
 use crate::drone::{Drone, DroneSpawnConfig, MAX_DRONE_COUNT, MIN_DRONE_COUNT};
 use crate::lidar::gpu::GpuGlobalStats;
-use crate::map::{GlobalMap, LocalMap};
 use crate::world::WorldConfig;
 
 use super::constants::SIDE_PANEL_DEFAULT_WIDTH;
@@ -14,8 +13,7 @@ pub fn draw_ui(
     mut contexts: EguiContexts,
     mut state: ResMut<UiState>,
     mut spawn_config: ResMut<DroneSpawnConfig>,
-    drones_q: Query<&LocalMap, With<Drone>>,
-    _global_map: Option<Res<GlobalMap>>,
+    drones_q: Query<(), With<Drone>>,
     gpu_stats: Res<GpuGlobalStats>,
     world: Res<WorldConfig>,
     diagnostics: Res<DiagnosticsStore>,
@@ -37,7 +35,6 @@ pub fn draw_ui(
             ui.checkbox(&mut state.show_ground_truth, "Show ground truth");
             ui.checkbox(&mut state.show_local_maps, "Show drone local maps");
             ui.checkbox(&mut state.show_global_map, "Show central map");
-            ui.checkbox(&mut state.show_rays, "Show last-scan rays");
             ui.separator();
 
             ui.label("Swarm size");
@@ -48,23 +45,7 @@ pub fn draw_ui(
                 )
                 .text("drones"),
             );
-            ui.separator();
-
-            ui.label(format!("Drone scans ({} live):", drones_q.iter().count()));
-            for (i, local_map) in drones_q.iter().enumerate().take(10) {
-                let (free, occupied) = local_map.0.count_known();
-                let total = (local_map.0.dims.x * local_map.0.dims.y * local_map.0.dims.z) as usize;
-                ui.label(format!(
-                    "  drone {} — free {} | occ {} | / {}",
-                    i, free, occupied, total
-                ));
-            }
-            if drones_q.iter().count() > 10 {
-                ui.label(format!(
-                    "  ... and {} more",
-                    drones_q.iter().count() - 10
-                ));
-            }
+            ui.label(format!("Drones live: {}", drones_q.iter().count()));
             ui.separator();
 
             ui.label("Central map (GPU readback):");

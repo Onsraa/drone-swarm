@@ -1,4 +1,2 @@
-use bevy::prelude::*;
-
-#[derive(Component, Default)]
-pub struct LastScanRays(pub Vec<(Vec3, Vec3)>);
+// Intentionally empty. Stage 9Ed retired `LastScanRays` (CPU-driven
+// gizmo viz) along with the rest of the CPU map/lidar machinery.

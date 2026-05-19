@@ -5,7 +5,6 @@ mod sampling;
 
 use bevy::prelude::*;
 
-pub use components::LastScanRays;
 pub use gpu::GpuLidarPlugin;
 
 use sampling::LidarRayDirs;

@@ -26,11 +26,4 @@ impl InstancedVoxelLayer {
     pub fn new(data: Vec<InstanceData>) -> Self {
         Self { data, generation: 1 }
     }
-
-    /// Full rewrite. Bumps generation so the GPU buffer re-uploads from 0.
-    pub fn replace(&mut self, data: Vec<InstanceData>) {
-        self.data = data;
-        self.generation = self.generation.wrapping_add(1);
-    }
-
 }

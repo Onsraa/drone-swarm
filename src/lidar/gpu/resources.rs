@@ -68,9 +68,6 @@ pub struct DroneOrientationsBuffer(pub Handle<ShaderStorageBuffer>);
 pub struct RayDirsBuffer(pub Handle<ShaderStorageBuffer>);
 
 #[derive(Resource, ExtractResource, Clone)]
-pub struct LidarHitsBuffer(pub Handle<ShaderStorageBuffer>);
-
-#[derive(Resource, ExtractResource, Clone)]
 pub struct LocalOccupancyBuffer(pub Handle<ShaderStorageBuffer>);
 
 #[derive(Resource, ExtractResource, Clone)]
@@ -93,12 +90,6 @@ pub struct GlobalInstanceCountBuffer(pub Handle<ShaderStorageBuffer>);
 
 #[derive(Resource, ExtractResource, Clone)]
 pub struct GlobalInstanceVecBuffer(pub Handle<ShaderStorageBuffer>);
-
-/// Stash for the latest GPU hits buffer. The Readback observer writes
-/// here from the main world; `apply_lidar_hits` drains and feeds each
-/// drone's trail into its `LocalMap` via `upgrade()`.
-#[derive(Resource, Default)]
-pub struct PendingLidarHits(pub Option<Vec<u32>>);
 
 /// One-shot startup: packs the CPU ground truth and allocates every
 /// lidar input/output buffer. Positions and params start zeroed; the
@@ -145,12 +136,6 @@ pub fn setup_gpu_lidar_assets(
     let mut dirs_buf = ShaderStorageBuffer::from(ray_dirs);
     dirs_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
     let dirs_handle = buffers.add(dirs_buf);
-
-    let hits_len =
-        (MAX_DRONES_GPU * params.rays_per_scan * params.max_steps) as usize;
-    let mut hits_buf = ShaderStorageBuffer::from(vec![0u32; hits_len]);
-    hits_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
-    let hits_handle = buffers.add(hits_buf);
 
     let words_per_drone = occupancy_words_per_drone(ground.dims);
     let occupancy_len = (MAX_DRONES_GPU as usize) * words_per_drone;
@@ -203,11 +188,10 @@ pub fn setup_gpu_lidar_assets(
     let global_instance_vec_handle = buffers.add(global_instance_vec_buf);
 
     info!(
-        "GPU lidar buffers allocated: {} drone slots, {} rays/scan, {} steps/ray, {} hit u32s, {} occupancy u32s ({} words/drone)",
+        "GPU lidar buffers allocated: {} drone slots, {} rays/scan, {} steps/ray, {} occupancy u32s ({} words/drone)",
         MAX_DRONES_GPU,
         params.rays_per_scan,
         params.max_steps,
-        hits_len,
         occupancy_len,
         words_per_drone,
     );
@@ -217,7 +201,6 @@ pub fn setup_gpu_lidar_assets(
     commands.insert_resource(DronePositionsBuffer(positions_handle));
     commands.insert_resource(DroneOrientationsBuffer(orientations_handle));
     commands.insert_resource(RayDirsBuffer(dirs_handle));
-    commands.insert_resource(LidarHitsBuffer(hits_handle));
     commands.insert_resource(LocalOccupancyBuffer(occupancy_handle));
     commands.insert_resource(GlobalOccupancyBuffer(global_occupancy_handle));
     commands.insert_resource(BuildLocalParamsBuffer(build_params_handle));
