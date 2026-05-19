@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use crate::world::{GroundTruthMap, WorldConfig};
 
 use super::components::GroundTruthVoxel;
-use super::constants::{GROUND_TRUTH_INSTANCE_COLOR, GROUND_TRUTH_SCALE_FACTOR};
+use super::constants::{GROUND_TRUTH_INSTANCE_COLOR, GROUND_TRUTH_POINT_PX};
 use super::instancing::{InstanceData, InstancedVoxelLayer};
 use super::resources::CubeMesh;
 
@@ -43,8 +43,9 @@ fn build_instances(map: &GroundTruthMap, voxel_size: f32) -> Vec<InstanceData> {
     map.iter_occupied()
         .map(|cell| {
             let pos = cell.as_vec3() * voxel_size + Vec3::splat(half);
+            // `pos_scale.w` is now pixel radius, not world meters.
             InstanceData {
-                pos_scale: [pos.x, pos.y, pos.z, voxel_size * GROUND_TRUTH_SCALE_FACTOR],
+                pos_scale: [pos.x, pos.y, pos.z, GROUND_TRUTH_POINT_PX],
                 color: GROUND_TRUTH_INSTANCE_COLOR,
             }
         })

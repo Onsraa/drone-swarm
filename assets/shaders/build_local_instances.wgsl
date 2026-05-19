@@ -59,7 +59,9 @@ fn build(@builtin(global_invocation_id) gid: vec3<u32>) {
     let x = rem % dx;
     let half = params.voxel_size * 0.5;
     let pos = vec3<f32>(f32(x), f32(y), f32(z)) * params.voxel_size + vec3<f32>(half);
-    let size = params.voxel_size * params.scale_factor;
+    // `size` is now a billboard pixel radius (interpreted by the
+    // instanced_voxel.wgsl vertex shader).
+    let size = params.scale_factor;
 
     let slot = atomicAdd(&instance_count, 1u);
     if (slot >= params.max_instances) {

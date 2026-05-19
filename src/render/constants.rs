@@ -5,11 +5,12 @@ pub const GROUND_TRUTH_INSTANCE_COLOR: [f32; 4] = [0.55, 0.55, 0.6, 1.0];
 pub const LOCAL_MAP_COLOR_FACTOR: f32 = 1.0;
 pub const LOCAL_MAP_ALPHA: f32 = 0.85;
 
-/// Per-layer scale multipliers on the cube size. Map layers (ground
-/// truth, per-drone local, global) all render as point-cloud-sized
-/// nubs (~15% of a voxel) so the result reads as a lidar-style
-/// composition of points instead of a wall of solid cubes. At this
-/// size z-fighting between overlapping layers stops mattering, so we
-/// drop the historic +1% / +2% inflation.
-pub const GROUND_TRUTH_SCALE_FACTOR: f32 = 0.15;
-pub const LOCAL_MAP_SCALE_FACTOR: f32 = 0.15;
+/// Per-layer billboard radius in screen pixels. The shader treats
+/// `pos_scale.w` as a pixel radius and synthesises a camera-facing
+/// quad around the point. Tuning these makes the visual hierarchy:
+/// ground truth thin so it doesn't dominate, local maps a touch
+/// bigger, spray brightest to read as "live lidar fire". Global-map
+/// and spray sizes are mirrored as WGSL consts in
+/// `build_global_instances.wgsl` and `lidar_compute.wgsl`.
+pub const GROUND_TRUTH_POINT_PX: f32 = 2.0;
+pub const LOCAL_MAP_POINT_PX: f32 = 4.0;

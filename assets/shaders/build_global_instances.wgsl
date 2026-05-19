@@ -19,8 +19,8 @@ struct BuildParams {
 @group(0) @binding(2) var<storage, read_write> instance_count: atomic<u32>;
 @group(0) @binding(3) var<storage, read_write> instance_buffer: array<vec4<f32>>;
 
-const GLOBAL_COLOR: vec4<f32> = vec4<f32>(0.1, 0.85, 1.0, 0.7);
-const GLOBAL_SCALE_FACTOR: f32 = 0.15;
+const GLOBAL_COLOR: vec4<f32> = vec4<f32>(0.1, 0.85, 1.0, 0.85);
+const GLOBAL_POINT_PX: f32 = 3.0;
 // Max instances the buffer holds (matches the CPU-side allocation).
 const GLOBAL_MAX_INSTANCES: u32 = 1000000u;
 
@@ -48,7 +48,7 @@ fn build_global(@builtin(global_invocation_id) gid: vec3<u32>) {
     let x = rem % dx;
     let half = params.voxel_size * 0.5;
     let pos = vec3<f32>(f32(x), f32(y), f32(z)) * params.voxel_size + vec3<f32>(half);
-    let size = params.voxel_size * GLOBAL_SCALE_FACTOR;
+    let size = GLOBAL_POINT_PX;
 
     let slot = atomicAdd(&instance_count, 1u);
     if (slot >= GLOBAL_MAX_INSTANCES) {

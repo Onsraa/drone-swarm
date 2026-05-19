@@ -275,7 +275,7 @@ fn upload_build_params_and_colors(
             dims: UVec4::new(config.size.x, config.size.y, config.size.z, 0),
             drone_count: count,
             voxel_size: config.voxel_size,
-            scale_factor: crate::render::constants::LOCAL_MAP_SCALE_FACTOR,
+            scale_factor: crate::render::constants::LOCAL_MAP_POINT_PX,
             max_instances: MAX_LOCAL_INSTANCES,
             drone_mask_lo: mask_visual[0],
             drone_mask_hi: mask_visual[1],
