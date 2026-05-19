@@ -2,14 +2,15 @@
 use bevy::prelude::*;
 
 use crate::comms::CommsState;
-use crate::drone::{Drone, DroneId};
-use crate::physics::LinearVelocity;
+use crate::drone::{Drone, DroneId, CRUISE_SPEED_MPS};
+use crate::physics::{DesiredVelocity, LinearVelocity};
 
 use super::components::{FrontierTarget, MovementHealth, Path};
 use super::constants::{
-    FRONTIER_REACHED_DIST, SCORE_UPGRADE_RATIO, STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS,
-    STUCK_VEL_MPS,
+    FRONTIER_REACHED_DIST, PATH_FOLLOW_LERP_RATE, SCORE_UPGRADE_RATIO,
+    STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS, STUCK_VEL_MPS,
 };
+use super::steering::pure_pursuit;
 use super::resources::FrontierClusters;
 use super::scoring::{crowding_for, score, ScoringWeights};
 use rand::RngExt;
@@ -168,5 +169,23 @@ pub fn stuck_recovery(
         }
     }
 }
-pub fn steer_along_path() {}
+pub fn steer_along_path(
+    time: Res<Time>,
+    mut q: Query<(&Transform, &mut Path, &mut DesiredVelocity), With<Drone>>,
+) {
+    let dt = time.delta_secs();
+    for (transform, mut path, mut desired) in &mut q {
+        let Some(waypoint) = pure_pursuit(&mut path, transform.translation) else {
+            continue;
+        };
+        let to_wp = waypoint - transform.translation;
+        let dist = to_wp.length();
+        if dist < 1e-3 {
+            continue;
+        }
+        let target_vel = (to_wp / dist) * CRUISE_SPEED_MPS;
+        let alpha = (PATH_FOLLOW_LERP_RATE * dt).min(1.0);
+        desired.0 = desired.0.lerp(target_vel, alpha);
+    }
+}
 pub fn reactive_avoid() {}
