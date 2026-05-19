@@ -19,8 +19,8 @@ pub use systems::ReplanTimer;
 
 use crate::physics::PhysicsSet;
 use systems::{
-    assign_targets, compute_frontier_clusters, rebuild_planner_grid, replan_paths,
-    reactive_avoid, steer_along_path, stuck_recovery, update_movement_health,
+    assign_targets, compute_frontier_clusters, enforce_anchor_hover, rebuild_planner_grid,
+    reactive_avoid, replan_paths, steer_along_path, stuck_recovery, update_movement_health,
 };
 
 pub struct ExplorationPlugin;
@@ -48,6 +48,13 @@ impl Plugin for ExplorationPlugin {
                 (steer_along_path, reactive_avoid)
                     .after(replan_paths)
                     .after(crate::drone::wander)
+                    .before(PhysicsSet::Control),
+            )
+            .add_systems(
+                Update,
+                enforce_anchor_hover
+                    .after(steer_along_path)
+                    .after(reactive_avoid)
                     .before(PhysicsSet::Control),
             );
     }

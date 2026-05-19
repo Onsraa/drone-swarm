@@ -3,15 +3,15 @@ use bevy::prelude::*;
 use std::collections::HashSet;
 
 use crate::comms::CommsState;
-use crate::drone::{Drone, DroneId, CRUISE_SPEED_MPS};
+use crate::drone::{Drone, DroneId};
 use crate::lidar::gpu::GpuGlobalOccupancyMirror;
 use crate::physics::{DesiredVelocity, LinearVelocity};
 
 use super::cluster::build_clusters;
 use super::components::{FrontierTarget, MovementHealth, Path};
 use super::constants::{
-    AVOID_K_DEFAULT, AVOID_RADIUS_M, FRONTIER_REACHED_DIST, FRONTIER_REFRESH_SECS,
-    PATH_FOLLOW_LERP_RATE, PLANNER_DOWNSAMPLE, REPLAN_MIN_INTERVAL_SECS, SCORE_UPGRADE_RATIO,
+    AVOID_RADIUS_M, FRONTIER_REACHED_DIST, FRONTIER_REFRESH_SECS, PATH_FOLLOW_LERP_RATE,
+    PLANNER_DOWNSAMPLE, REPLAN_MIN_INTERVAL_SECS, SCORE_UPGRADE_RATIO,
     STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS, STUCK_VEL_MPS,
 };
 use super::planner::plan;
@@ -143,16 +143,19 @@ pub fn rebuild_planner_grid(
 
 pub fn compute_frontier_clusters(
     time: Res<Time>,
-    mut timer: Local<f32>,
+    mut timer: Local<Option<f32>>,
     mirror: Res<GpuGlobalOccupancyMirror>,
     world: Res<crate::world::WorldConfig>,
     mut clusters: ResMut<FrontierClusters>,
 ) {
-    *timer += time.delta_secs();
-    if *timer < FRONTIER_REFRESH_SECS {
+    // Seed the timer 0.5 s ahead of `rebuild_planner_grid` so the two
+    // 1 Hz CPU scans don't land on the same frame.
+    let t = timer.get_or_insert(0.5);
+    *t += time.delta_secs();
+    if *t < FRONTIER_REFRESH_SECS {
         return;
     }
-    *timer = 0.0;
+    *t = 0.0;
     if mirror.data.is_empty() {
         return;
     }
@@ -169,38 +172,53 @@ pub fn compute_frontier_clusters(
     };
     let mut candidates: HashSet<UVec3> = HashSet::new();
     let plane = dims.x * dims.y;
-    for cell in 0..total {
-        if read(cell) != 0b01 {
+
+    // Word-iterate: skip all-zero words. At cold start most of the
+    // bitset is Unknown (= all-zero), so this skips ~99% of the work.
+    for w_idx in 0..data.len() {
+        let word = data[w_idx];
+        if word == 0 {
             continue;
         }
-        // Free cell — push Unknown 6-neighbours.
-        let z = cell / plane;
-        let rem = cell % plane;
-        let y = rem / dims.x;
-        let x = rem % dims.x;
-        let ix = x as i32;
-        let iy = y as i32;
-        let iz = z as i32;
-        for d in [
-            IVec3::new(-1, 0, 0),
-            IVec3::new(1, 0, 0),
-            IVec3::new(0, -1, 0),
-            IVec3::new(0, 1, 0),
-            IVec3::new(0, 0, -1),
-            IVec3::new(0, 0, 1),
-        ] {
-            let nx = ix + d.x;
-            let ny = iy + d.y;
-            let nz = iz + d.z;
-            if nx < 0 || ny < 0 || nz < 0 {
+        let base_cell = (w_idx as u32) * 16;
+        for slot in 0..16u32 {
+            let state = (word >> (slot * 2)) & 0b11;
+            if state != 0b01 {
                 continue;
             }
-            if nx as u32 >= dims.x || ny as u32 >= dims.y || nz as u32 >= dims.z {
-                continue;
+            let cell = base_cell + slot;
+            if cell >= total {
+                break;
             }
-            let nflat = nx as u32 + ny as u32 * dims.x + nz as u32 * plane;
-            if read(nflat) == 0 {
-                candidates.insert(UVec3::new(nx as u32, ny as u32, nz as u32));
+            // Free cell — push Unknown 6-neighbours.
+            let z = cell / plane;
+            let rem = cell % plane;
+            let y = rem / dims.x;
+            let x = rem % dims.x;
+            let ix = x as i32;
+            let iy = y as i32;
+            let iz = z as i32;
+            for d in [
+                IVec3::new(-1, 0, 0),
+                IVec3::new(1, 0, 0),
+                IVec3::new(0, -1, 0),
+                IVec3::new(0, 1, 0),
+                IVec3::new(0, 0, -1),
+                IVec3::new(0, 0, 1),
+            ] {
+                let nx = ix + d.x;
+                let ny = iy + d.y;
+                let nz = iz + d.z;
+                if nx < 0 || ny < 0 || nz < 0 {
+                    continue;
+                }
+                if nx as u32 >= dims.x || ny as u32 >= dims.y || nz as u32 >= dims.z {
+                    continue;
+                }
+                let nflat = nx as u32 + ny as u32 * dims.x + nz as u32 * plane;
+                if read(nflat) == 0 {
+                    candidates.insert(UVec3::new(nx as u32, ny as u32, nz as u32));
+                }
             }
         }
     }
@@ -316,10 +334,15 @@ pub fn stuck_recovery(
 }
 pub fn steer_along_path(
     time: Res<Time>,
-    mut q: Query<(&Transform, &mut Path, &mut DesiredVelocity), With<Drone>>,
+    mut q: Query<(&Transform, &Role, &mut Path, &mut DesiredVelocity), With<Drone>>,
 ) {
     let dt = time.delta_secs();
-    for (transform, mut path, mut desired) in &mut q {
+    for (transform, role, mut path, mut desired) in &mut q {
+        let cruise = RoleParams::for_role(*role).cruise_speed_mps;
+        if cruise <= 0.0 {
+            // Anchors don't move via the planner.
+            continue;
+        }
         let Some(waypoint) = pure_pursuit(&mut path, transform.translation) else {
             continue;
         };
@@ -328,17 +351,21 @@ pub fn steer_along_path(
         if dist < 1e-3 {
             continue;
         }
-        let target_vel = (to_wp / dist) * CRUISE_SPEED_MPS;
+        let target_vel = (to_wp / dist) * cruise;
         let alpha = (PATH_FOLLOW_LERP_RATE * dt).min(1.0);
         desired.0 = desired.0.lerp(target_vel, alpha);
     }
 }
+#[allow(clippy::too_many_arguments)]
 pub fn reactive_avoid(
     mirror: Res<GpuGlobalOccupancyMirror>,
     comms: Res<CommsState>,
     world: Res<crate::world::WorldConfig>,
-    mut q_self: Query<(&DroneId, &Transform, &mut DesiredVelocity), With<Drone>>,
+    mut q_self: Query<(&DroneId, &Transform, &Role, &mut DesiredVelocity), With<Drone>>,
     q_peers: Query<(&DroneId, &Transform), With<Drone>>,
+    mut hits_buf: Local<Vec<Vec3>>,
+    mut peers_buf: Local<Vec<Vec3>>,
+    mut peer_snapshot: Local<Vec<(u32, Vec3)>>,
 ) {
     if mirror.data.is_empty() {
         return;
@@ -357,13 +384,13 @@ pub fn reactive_avoid(
     };
 
     let radius_cells = (AVOID_RADIUS_M / voxel_size).ceil() as i32;
-    let peer_snapshot: Vec<(u32, Vec3)> =
-        q_peers.iter().map(|(id, t)| (id.0, t.translation)).collect();
+    peer_snapshot.clear();
+    peer_snapshot.extend(q_peers.iter().map(|(id, t)| (id.0, t.translation)));
 
-    for (id, transform, mut desired) in &mut q_self {
+    for (id, transform, role, mut desired) in &mut q_self {
         let pos = transform.translation;
         let drone_cell = (pos / voxel_size).floor().as_ivec3();
-        let mut hits = Vec::new();
+        hits_buf.clear();
         for dz in -radius_cells..=radius_cells {
             for dy in -radius_cells..=radius_cells {
                 for dx in -radius_cells..=radius_cells {
@@ -377,33 +404,43 @@ pub fn reactive_avoid(
                     }
                     let state = read(u);
                     if state & 0b10 != 0 {
-                        // Occupied cell center in world coords.
                         let wp = Vec3::new(u.x as f32, u.y as f32, u.z as f32) * voxel_size
                             + Vec3::splat(voxel_size * 0.5);
-                        hits.push(wp);
+                        hits_buf.push(wp);
                     }
                 }
             }
         }
         // Filter peer list to comms-connected peers.
+        peers_buf.clear();
         let half = (id.0 >= 32) as usize;
         let connected = (comms.connected_mask[half] >> (id.0 % 32)) & 1 == 1;
-        let peers: Vec<Vec3> = if connected {
-            peer_snapshot
-                .iter()
-                .filter(|(pid, _)| {
-                    if *pid == id.0 {
-                        return false;
-                    }
-                    let h = (*pid >= 32) as usize;
-                    (comms.connected_mask[h] >> (pid % 32)) & 1 == 1
-                })
-                .map(|(_, p)| *p)
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let force = reactive_force(pos, &hits, &peers, AVOID_K_DEFAULT);
+        if connected {
+            for (pid, p) in peer_snapshot.iter() {
+                if *pid == id.0 {
+                    continue;
+                }
+                let h = (*pid >= 32) as usize;
+                if (comms.connected_mask[h] >> (pid % 32)) & 1 == 1 {
+                    peers_buf.push(*p);
+                }
+            }
+        }
+        let avoid_k = RoleParams::for_role(*role).avoid_k;
+        let force = reactive_force(pos, &hits_buf, &peers_buf, avoid_k);
         desired.0 += force;
+    }
+}
+
+/// Anchors hover. Runs after every other steering input so it
+/// authoritatively zeroes `DesiredVelocity` for any Role::Anchor drone
+/// before the physics controller sees it.
+pub fn enforce_anchor_hover(
+    mut q: Query<(&Role, &mut DesiredVelocity), With<Drone>>,
+) {
+    for (role, mut desired) in &mut q {
+        if *role == Role::Anchor {
+            desired.0 = Vec3::ZERO;
+        }
     }
 }
