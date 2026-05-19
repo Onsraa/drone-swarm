@@ -5,12 +5,11 @@ mod pipeline;
 mod queue;
 
 use bevy::core_pipeline::core_3d::Transparent3d;
-use bevy::ecs::query::QueryItem;
 use bevy::prelude::*;
-use bevy::render::extract_component::{ExtractComponent, ExtractComponentPlugin};
 use bevy::render::render_phase::AddRenderCommand;
 use bevy::render::render_resource::SpecializedMeshPipelines;
-use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
+use bevy::render::sync_world::{RenderEntity, SyncToRenderWorld};
+use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems};
 
 pub use components::{InstanceData, InstancedVoxelLayer};
 
@@ -19,25 +18,16 @@ use draw::DrawVoxelInstanced;
 use pipeline::{init_voxel_instanced_pipeline, VoxelInstancedPipeline};
 use queue::queue_voxel_instanced;
 
-impl ExtractComponent for InstancedVoxelLayer {
-    type QueryData = &'static InstancedVoxelLayer;
-    type QueryFilter = ();
-    type Out = Self;
-
-    fn extract_component(item: QueryItem<'_, '_, Self::QueryData>) -> Option<Self> {
-        Some(item.clone())
-    }
-}
-
 pub struct InstancedVoxelPlugin;
 
 impl Plugin for InstancedVoxelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ExtractComponentPlugin::<InstancedVoxelLayer>::default());
+        app.register_required_components::<InstancedVoxelLayer, SyncToRenderWorld>();
         app.sub_app_mut(RenderApp)
             .add_render_command::<Transparent3d, DrawVoxelInstanced>()
             .init_resource::<SpecializedMeshPipelines<VoxelInstancedPipeline>>()
             .add_systems(RenderStartup, init_voxel_instanced_pipeline)
+            .add_systems(ExtractSchedule, extract_voxel_layers)
             .add_systems(
                 Render,
                 (
@@ -45,5 +35,25 @@ impl Plugin for InstancedVoxelPlugin {
                     prepare_instance_buffers.in_set(RenderSystems::PrepareResources),
                 ),
             );
+    }
+}
+
+/// Change-gated replacement for `ExtractComponentPlugin::<InstancedVoxelLayer>`.
+/// The plugin would clone the whole `Vec<InstanceData>` from main to render
+/// every frame; with the append-only local-map path the Vec grows
+/// monotonically, so that clone cost scales with session length. Here we
+/// only clone when the source layer was actually mutated (or first-seen).
+fn extract_voxel_layers(
+    mut commands: Commands,
+    main: Extract<Query<(&RenderEntity, Ref<InstancedVoxelLayer>)>>,
+) {
+    for (render_entity, layer) in &main {
+        if !layer.is_changed() {
+            continue;
+        }
+        commands.entity(render_entity.id()).insert(InstancedVoxelLayer {
+            data: layer.data.clone(),
+            generation: layer.generation,
+        });
     }
 }
