@@ -125,13 +125,12 @@ impl render_graph::Node for BuildLocalNode {
         let Some(compute_pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) else {
             return Ok(());
         };
-        let Some(world_config) = world.get_resource::<crate::world::WorldConfig>() else {
-            return Ok(());
-        };
-
-        let dims = world_config.size;
+        // Use the default world dims directly to avoid needing
+        // WorldConfig in the render world. The shader bounds-checks
+        // `cell_flat >= cells_per_drone`, so a fixed-size dispatch is
+        // safe even if the world is smaller than the constant.
+        let dims = crate::world::WorldConfig::default().size;
         let cells_per_drone = dims.x * dims.y * dims.z;
-        // Workgroup_size_x = 64; one workgroup per 64 cells per drone.
         let groups_x = cells_per_drone.div_ceil(64);
         let groups_y = super::resources::MAX_DRONES_GPU;
 

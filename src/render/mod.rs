@@ -31,9 +31,6 @@ impl Plugin for VoxelRenderPlugin {
                     spawn_ground_truth_layer.after(init_voxel_assets),
                 ),
             )
-            // The CPU `sync_local_maps` path is replaced by the GPU
-            // build pass + `GpuLocalMapPlugin`. `sync_global_map` still
-            // drives the central map renderer until Tier 3 follow-up.
             .add_systems(Update, sync_global_map);
     }
 }

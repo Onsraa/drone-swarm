@@ -34,7 +34,12 @@ pub struct GpuLocalInstanceCount(pub u32);
 pub struct GpuLocalMapVoxelTag;
 
 impl ExtractComponent for GpuLocalMapVoxel {
-    type QueryData = ();
+    // `QueryData = &'static GpuLocalMapVoxel` is critical: it scopes the
+    // extract to entities that actually carry the marker. With the empty
+    // tuple Bevy matches every entity in the main world and stamps the
+    // tag everywhere, which lets `prepare_gpu_local_instance_buffer`
+    // clobber ground truth's InstanceBuffer with a zero-length one.
+    type QueryData = &'static GpuLocalMapVoxel;
     type QueryFilter = ();
     type Out = GpuLocalMapVoxelTag;
 
