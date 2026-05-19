@@ -9,6 +9,7 @@ use bevy::render::render_resource::{
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::storage::GpuShaderStorageBuffer;
 
+use super::per_drone_scan::DroneScanParamsBuffer;
 use super::pipeline::ComputeLidarPipeline;
 use super::resources::{
     DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer, GroundTruthBuffer,
@@ -35,6 +36,7 @@ pub fn prepare_lidar_bind_group(
     colors: Option<Res<DroneColorsBuffer>>,
     point_count: Option<Res<LidarPointCountBuffer>>,
     point_vec: Option<Res<LidarPointVecBuffer>>,
+    scan_params: Option<Res<DroneScanParamsBuffer>>,
     buffers: Res<RenderAssets<GpuShaderStorageBuffer>>,
 ) {
     let (
@@ -47,6 +49,7 @@ pub fn prepare_lidar_bind_group(
         Some(colors),
         Some(point_count),
         Some(point_vec),
+        Some(scan_params),
     ) = (
         ground,
         params,
@@ -57,6 +60,7 @@ pub fn prepare_lidar_bind_group(
         colors,
         point_count,
         point_vec,
+        scan_params,
     ) else {
         return;
     };
@@ -69,6 +73,7 @@ pub fn prepare_lidar_bind_group(
     let Some(colors_buf) = buffers.get(&colors.0) else { return; };
     let Some(point_count_buf) = buffers.get(&point_count.0) else { return; };
     let Some(point_vec_buf) = buffers.get(&point_vec.0) else { return; };
+    let Some(scan_params_buf) = buffers.get(&scan_params.0) else { return; };
 
     let bind_group = render_device.create_bind_group(
         "compute lidar bind group",
@@ -83,6 +88,7 @@ pub fn prepare_lidar_bind_group(
             colors_buf.buffer.as_entire_buffer_binding(),
             point_count_buf.buffer.as_entire_buffer_binding(),
             point_vec_buf.buffer.as_entire_buffer_binding(),
+            scan_params_buf.buffer.as_entire_buffer_binding(),
         )),
     );
     commands.insert_resource(LidarBindGroup(bind_group));
