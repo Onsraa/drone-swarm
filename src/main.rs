@@ -1,4 +1,5 @@
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
+use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
 
@@ -27,7 +28,15 @@ use world::WorldPlugin;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(LogPlugin {
+            // Drone GLB carries extra TEXCOORD_2..9 channels Bevy's glTF
+            // loader doesn't know about. They're harmless but spam WARN on
+            // every load. Bump that target above WARN to keep the boot log
+            // readable.
+            filter: "info,wgpu_core=warn,wgpu_hal=warn,naga=warn,bevy_gltf::loader=error".to_string(),
+            level: bevy::log::Level::INFO,
+            ..default()
+        }))
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(EguiPlugin::default())
         .add_plugins(WorldPlugin)
