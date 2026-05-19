@@ -17,10 +17,11 @@ pub(crate) struct ExplorationResetParams<'w, 's> {
 }
 use crate::lidar::gpu::{
     BuildLocalParamsBuffer, DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer,
-    GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, GlobalOccupancyBuffer,
-    GpuGlobalOccupancyMirror, GpuGlobalStats, GroundTruthBuffer, LidarParamsBuffer,
-    LidarPointCountBuffer, LidarPointVecBuffer, LocalInstanceCountBuffer, LocalInstanceVecBuffer,
-    LocalOccupancyBuffer, RayDirsBuffer,
+    GlobalActiveCellsBuffer, GlobalActiveCountBuffer, GlobalInstanceCountBuffer,
+    GlobalInstanceVecBuffer, GlobalOccupancyBuffer, GpuGlobalOccupancyMirror, GpuGlobalStats,
+    GroundTruthBuffer, LidarParamsBuffer, LidarPointCountBuffer, LidarPointVecBuffer,
+    LocalActiveCellsBuffer, LocalActiveCountBuffer, LocalInstanceCountBuffer,
+    LocalInstanceVecBuffer, LocalOccupancyBuffer, RayDirsBuffer,
 };
 use crate::render::{GpuGlobalMapVoxel, GpuLocalMapVoxel, GroundTruthVoxel, LidarPointVoxel};
 use crate::world::{GroundTruthMap, WorldConfig};
@@ -141,6 +142,10 @@ pub fn apply_pending_swap(
     commands.remove_resource::<GlobalInstanceVecBuffer>();
     commands.remove_resource::<LidarPointCountBuffer>();
     commands.remove_resource::<LidarPointVecBuffer>();
+    commands.remove_resource::<LocalActiveCellsBuffer>();
+    commands.remove_resource::<LocalActiveCountBuffer>();
+    commands.remove_resource::<GlobalActiveCellsBuffer>();
+    commands.remove_resource::<GlobalActiveCountBuffer>();
 
     *stats = GpuGlobalStats::default();
     mirror.data.clear();

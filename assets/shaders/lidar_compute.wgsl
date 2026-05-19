@@ -45,6 +45,13 @@ struct DroneScanParams {
 @group(0) @binding(8) var<storage, read_write> point_buffer: array<vec4<f32>>;
 @group(0) @binding(9) var<storage, read> drone_scan: array<DroneScanParams>;
 @group(0) @binding(10) var<storage, read_write> global_occupancy: array<atomic<u32>>;
+@group(0) @binding(11) var<storage, read_write> local_active_cells: array<u32>;
+@group(0) @binding(12) var<storage, read_write> local_active_count: array<atomic<u32>>;
+@group(0) @binding(13) var<storage, read_write> global_active_cells: array<u32>;
+@group(0) @binding(14) var<storage, read_write> global_active_count: atomic<u32>;
+
+const MAX_LOCAL_ACTIVE_PER_DRONE: u32 = 200000u;
+const MAX_GLOBAL_ACTIVE: u32 = 500000u;
 
 fn cell_flat_idx(cell: vec3<i32>) -> u32 {
     return u32(cell.x)
@@ -103,12 +110,31 @@ fn mark_cell_state(drone_idx: u32, flat: u32, state_bits: u32) {
     let word_idx = drone_idx * words_per_drone + flat / 16u;
     let bit_offset = (flat % 16u) * 2u;
     let mask = state_bits << bit_offset;
-    atomicOr(&local_occupancy[word_idx], mask);
+    let prev = atomicOr(&local_occupancy[word_idx], mask);
+
+    // If this is a transition Unknown -> Occupied (the high bit was
+    // clear and we're setting it now), append the cell to the per-drone
+    // active list so the build pass only iterates touched cells.
+    let was_occupied = ((prev >> bit_offset) & 0x2u) != 0u;
+    let now_occupied = (state_bits & 0x2u) != 0u;
+    if (now_occupied && !was_occupied) {
+        let slot = atomicAdd(&local_active_count[drone_idx], 1u);
+        if (slot < MAX_LOCAL_ACTIVE_PER_DRONE) {
+            local_active_cells[drone_idx * MAX_LOCAL_ACTIVE_PER_DRONE + slot] = flat;
+        }
+    }
 
     let comms = select(params.connected_mask_lo, params.connected_mask_hi, drone_idx >= 32u);
     if (((comms >> (drone_idx % 32u)) & 1u) != 0u) {
         let global_word = flat / 16u;
-        atomicOr(&global_occupancy[global_word], mask);
+        let prev_global = atomicOr(&global_occupancy[global_word], mask);
+        let was_global_occupied = ((prev_global >> bit_offset) & 0x2u) != 0u;
+        if (now_occupied && !was_global_occupied) {
+            let g_slot = atomicAdd(&global_active_count, 1u);
+            if (g_slot < MAX_GLOBAL_ACTIVE) {
+                global_active_cells[g_slot] = flat;
+            }
+        }
     }
 }
 

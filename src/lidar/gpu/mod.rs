@@ -8,9 +8,11 @@ mod resources;
 pub use per_drone_scan::{DroneScanParams, DroneScanParamsBuffer};
 pub use resources::{
     BuildLocalParamsBuffer, DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer,
-    GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, GlobalOccupancyBuffer, GroundTruthBuffer,
-    LidarParamsBuffer, LidarPointCountBuffer, LidarPointVecBuffer, LocalInstanceCountBuffer,
-    LocalInstanceVecBuffer, LocalOccupancyBuffer, RayDirsBuffer, RoleConeRanges,
+    GlobalActiveCellsBuffer, GlobalActiveCountBuffer, GlobalInstanceCountBuffer,
+    GlobalInstanceVecBuffer, GlobalOccupancyBuffer, GroundTruthBuffer, LidarParamsBuffer,
+    LidarPointCountBuffer, LidarPointVecBuffer, LocalActiveCellsBuffer, LocalActiveCountBuffer,
+    LocalInstanceCountBuffer, LocalInstanceVecBuffer, LocalOccupancyBuffer, RayDirsBuffer,
+    RoleConeRanges,
 };
 
 use bevy::prelude::*;
@@ -89,6 +91,10 @@ impl Plugin for GpuLidarPlugin {
             .add_plugins(ExtractResourcePlugin::<DroneScanParamsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LidarSettings>::default())
             .add_plugins(ExtractResourcePlugin::<LidarFrameCounter>::default())
+            .add_plugins(ExtractResourcePlugin::<LocalActiveCellsBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<LocalActiveCountBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<GlobalActiveCellsBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<GlobalActiveCountBuffer>::default())
             .add_systems(
                 Update,
                 (
@@ -127,17 +133,20 @@ impl Plugin for GpuLidarPlugin {
                         .after(add_compute_render_graph_node),
                 ),
             )
+            // `set_data` each frame re-prepares the storage buffers as
+            // brand-new GPU Buffer handles, so the bind group must
+            // rebuild every frame to point at the live ones.
             .add_systems(
                 Render,
-                // `set_data` each frame re-prepares the storage buffers as
-                // brand-new GPU Buffer handles, so the bind group must
-                // rebuild every frame to point at the live ones.
-                (
-                    prepare_lidar_bind_group,
-                    prepare_build_local_bind_group,
-                    prepare_build_global_bind_group,
-                )
-                    .in_set(RenderSystems::PrepareBindGroups),
+                prepare_lidar_bind_group.in_set(RenderSystems::PrepareBindGroups),
+            )
+            .add_systems(
+                Render,
+                prepare_build_local_bind_group.in_set(RenderSystems::PrepareBindGroups),
+            )
+            .add_systems(
+                Render,
+                prepare_build_global_bind_group.in_set(RenderSystems::PrepareBindGroups),
             );
     }
 }

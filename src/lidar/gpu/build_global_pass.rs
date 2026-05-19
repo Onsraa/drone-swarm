@@ -14,8 +14,8 @@ use bevy::render::storage::GpuShaderStorageBuffer;
 
 use super::dispatch::ComputeLidarNodeLabel;
 use super::resources::{
-    BuildLocalParams, BuildLocalParamsBuffer, GlobalInstanceCountBuffer, GlobalInstanceVecBuffer,
-    GlobalOccupancyBuffer,
+    BuildLocalParams, BuildLocalParamsBuffer, GlobalActiveCellsBuffer, GlobalActiveCountBuffer,
+    GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, MAX_GLOBAL_ACTIVE,
 };
 
 const SHADER_ASSET_PATH: &str = "shaders/build_global_instances.wgsl";
@@ -36,14 +36,16 @@ pub fn init_build_global_pipeline(
         &BindGroupLayoutEntries::sequential(
             ShaderStages::COMPUTE,
             (
-                // 0: global occupancy SSBO (read)
-                storage_buffer_read_only::<Vec<u32>>(false),
-                // 1: build params
+                // 0: build params
                 storage_buffer_read_only::<BuildLocalParams>(false),
-                // 2: instance counter
+                // 1: instance counter
                 storage_buffer::<Vec<u32>>(false),
-                // 3: instance buffer (pos_scale + color pairs)
+                // 2: instance buffer (pos_scale + color pairs)
                 storage_buffer::<Vec<Vec4>>(false),
+                // 3: global active-cell list.
+                storage_buffer_read_only::<Vec<u32>>(false),
+                // 4: global active-cell count (atomic, read via atomicLoad).
+                storage_buffer::<Vec<u32>>(false),
             ),
         ),
     );
@@ -61,35 +63,44 @@ pub fn init_build_global_pipeline(
 #[derive(Resource)]
 pub struct BuildGlobalBindGroup(pub BindGroup);
 
+#[allow(clippy::too_many_arguments)]
 pub fn prepare_build_global_bind_group(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline: Res<BuildGlobalPipeline>,
     pipeline_cache: Res<PipelineCache>,
-    occupancy: Option<Res<GlobalOccupancyBuffer>>,
     params: Option<Res<BuildLocalParamsBuffer>>,
     count: Option<Res<GlobalInstanceCountBuffer>>,
     instances: Option<Res<GlobalInstanceVecBuffer>>,
+    active_cells: Option<Res<GlobalActiveCellsBuffer>>,
+    active_count: Option<Res<GlobalActiveCountBuffer>>,
     buffers: Res<RenderAssets<GpuShaderStorageBuffer>>,
 ) {
-    let (Some(occupancy), Some(params), Some(count), Some(instances)) =
-        (occupancy, params, count, instances)
+    let (
+        Some(params),
+        Some(count),
+        Some(instances),
+        Some(active_cells),
+        Some(active_count),
+    ) = (params, count, instances, active_cells, active_count)
     else {
         return;
     };
-    let Some(occupancy_buf) = buffers.get(&occupancy.0) else { return; };
     let Some(params_buf) = buffers.get(&params.0) else { return; };
     let Some(count_buf) = buffers.get(&count.0) else { return; };
     let Some(instances_buf) = buffers.get(&instances.0) else { return; };
+    let Some(active_cells_buf) = buffers.get(&active_cells.0) else { return; };
+    let Some(active_count_buf) = buffers.get(&active_count.0) else { return; };
 
     let bind_group = render_device.create_bind_group(
         "build global instances bind group",
         &pipeline_cache.get_bind_group_layout(&pipeline.layout),
         &BindGroupEntries::sequential((
-            occupancy_buf.buffer.as_entire_buffer_binding(),
             params_buf.buffer.as_entire_buffer_binding(),
             count_buf.buffer.as_entire_buffer_binding(),
             instances_buf.buffer.as_entire_buffer_binding(),
+            active_cells_buf.buffer.as_entire_buffer_binding(),
+            active_count_buf.buffer.as_entire_buffer_binding(),
         )),
     );
     commands.insert_resource(BuildGlobalBindGroup(bind_group));
@@ -125,20 +136,9 @@ impl render_graph::Node for BuildGlobalNode {
         let Some(compute_pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) else {
             return Ok(());
         };
-        // Same every-2-frames gate as BuildLocalNode. Render reads the
-        // central-map instance buffer every frame; a one-frame stale
-        // build is invisible.
-        let frame = world
-            .get_resource::<crate::lidar::LidarFrameCounter>()
-            .map(|c| c.0)
-            .unwrap_or(0);
-        if frame % 2 != 0 {
-            return Ok(());
-        }
-
-        let dims = crate::world::WorldConfig::default().size;
-        let cells_per_drone = dims.x * dims.y * dims.z;
-        let groups_x = cells_per_drone.div_ceil(256);
+        // Dispatch over the global active-cell list cap, not every
+        // cell in the world. Threads past the live count early-return.
+        let groups_x = MAX_GLOBAL_ACTIVE.div_ceil(256);
 
         let encoder = render_context.command_encoder();
         encoder.clear_buffer(&count_buf.buffer, 0, None);

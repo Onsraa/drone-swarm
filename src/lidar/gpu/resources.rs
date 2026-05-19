@@ -22,6 +22,19 @@ pub const MAX_DRONES_GPU: u32 = 50;
 /// drone_count * rays_per_scan per frame so the cap is overkill there.
 pub const MAX_LIDAR_POINTS: u32 = 2_000_000;
 
+/// Cap on cells each drone may have in its active-Occupied list. The
+/// list is append-only across frames; the lidar shader appends a cell
+/// flat-index the first time it flips that cell's Occupied bit. Build
+/// passes iterate the list instead of every cell × every drone — 50×
+/// fewer GPU thread invocations at 50 drones × 9.83 M cells. 200 K
+/// cells × 4 B × 50 drones = 40 MB GPU.
+pub const MAX_LOCAL_ACTIVE_PER_DRONE: u32 = 200_000;
+
+/// Cap on cells the global active list holds. One entry per cell
+/// where SOMEONE has flipped the global Occupied bit. 500 K × 4 B =
+/// 2 MB GPU.
+pub const MAX_GLOBAL_ACTIVE: u32 = 500_000;
+
 /// Stage 9B output buffer capacity: max number of Occupied-cell instances
 /// the build pass can emit across all drones in a single dispatch. At
 /// 640×24×640 with 50 drones, steady-state local-map coverage can hit
@@ -127,6 +140,18 @@ pub struct LidarPointCountBuffer(pub Handle<ShaderStorageBuffer>);
 
 #[derive(Resource, ExtractResource, Clone)]
 pub struct LidarPointVecBuffer(pub Handle<ShaderStorageBuffer>);
+
+#[derive(Resource, ExtractResource, Clone)]
+pub struct LocalActiveCellsBuffer(pub Handle<ShaderStorageBuffer>);
+
+#[derive(Resource, ExtractResource, Clone)]
+pub struct LocalActiveCountBuffer(pub Handle<ShaderStorageBuffer>);
+
+#[derive(Resource, ExtractResource, Clone)]
+pub struct GlobalActiveCellsBuffer(pub Handle<ShaderStorageBuffer>);
+
+#[derive(Resource, ExtractResource, Clone)]
+pub struct GlobalActiveCountBuffer(pub Handle<ShaderStorageBuffer>);
 
 /// One-shot startup: packs the CPU ground truth and allocates every
 /// lidar input/output buffer. Positions and params start zeroed; the
@@ -251,6 +276,27 @@ pub fn setup_gpu_lidar_assets(
 
     let scan_params_handle = alloc_scan_params(&mut buffers);
 
+    let local_active_len = (MAX_DRONES_GPU as usize) * (MAX_LOCAL_ACTIVE_PER_DRONE as usize);
+    let mut local_active_buf = ShaderStorageBuffer::from(vec![0u32; local_active_len]);
+    local_active_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let local_active_handle = buffers.add(local_active_buf);
+
+    let mut local_active_count_buf =
+        ShaderStorageBuffer::from(vec![0u32; MAX_DRONES_GPU as usize]);
+    local_active_count_buf.buffer_description.usage |=
+        BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let local_active_count_handle = buffers.add(local_active_count_buf);
+
+    let mut global_active_buf =
+        ShaderStorageBuffer::from(vec![0u32; MAX_GLOBAL_ACTIVE as usize]);
+    global_active_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let global_active_handle = buffers.add(global_active_buf);
+
+    let mut global_active_count_buf = ShaderStorageBuffer::from(vec![0u32; 1]);
+    global_active_count_buf.buffer_description.usage |=
+        BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let global_active_count_handle = buffers.add(global_active_count_buf);
+
     info!(
         "GPU lidar buffers allocated: {} drone slots, {} rays/scan, {} steps/ray, {} occupancy u32s ({} words/drone)",
         MAX_DRONES_GPU,
@@ -276,5 +322,9 @@ pub fn setup_gpu_lidar_assets(
     commands.insert_resource(LidarPointCountBuffer(point_count_handle));
     commands.insert_resource(LidarPointVecBuffer(point_vec_handle));
     commands.insert_resource(DroneScanParamsBuffer(scan_params_handle));
+    commands.insert_resource(LocalActiveCellsBuffer(local_active_handle));
+    commands.insert_resource(LocalActiveCountBuffer(local_active_count_handle));
+    commands.insert_resource(GlobalActiveCellsBuffer(global_active_handle));
+    commands.insert_resource(GlobalActiveCountBuffer(global_active_count_handle));
     commands.insert_resource(RoleConeRanges(role_ranges));
 }

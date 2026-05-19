@@ -14,8 +14,9 @@ use bevy::render::storage::GpuShaderStorageBuffer;
 
 use super::dispatch::ComputeLidarNodeLabel;
 use super::resources::{
-    BuildLocalParams, BuildLocalParamsBuffer, DroneColorsBuffer, LocalInstanceCountBuffer,
-    LocalInstanceVecBuffer, LocalOccupancyBuffer,
+    BuildLocalParams, BuildLocalParamsBuffer, DroneColorsBuffer, LocalActiveCellsBuffer,
+    LocalActiveCountBuffer, LocalInstanceCountBuffer, LocalInstanceVecBuffer,
+    MAX_LOCAL_ACTIVE_PER_DRONE,
 };
 
 const SHADER_ASSET_PATH: &str = "shaders/build_local_instances.wgsl";
@@ -36,16 +37,18 @@ pub fn init_build_local_pipeline(
         &BindGroupLayoutEntries::sequential(
             ShaderStages::COMPUTE,
             (
-                // 0: occupancy SSBO (read)
-                storage_buffer_read_only::<Vec<u32>>(false),
-                // 1: build params struct
+                // 0: build params struct
                 storage_buffer_read_only::<BuildLocalParams>(false),
-                // 2: drone colors (Vec<Vec4>)
+                // 1: drone colors (Vec<Vec4>)
                 storage_buffer_read_only::<Vec<Vec4>>(false),
-                // 3: instance counter (atomic u32)
+                // 2: instance counter (atomic u32)
                 storage_buffer::<Vec<u32>>(false),
-                // 4: instance buffer (Vec<Vec4>, pairs of pos_scale + color)
+                // 3: instance buffer (Vec<Vec4>, pairs of pos_scale + color)
                 storage_buffer::<Vec<Vec4>>(false),
+                // 4: per-drone active-cell list (cell flat-indices).
+                storage_buffer_read_only::<Vec<u32>>(false),
+                // 5: per-drone active-cell count (atomic, read via atomicLoad).
+                storage_buffer::<Vec<u32>>(false),
             ),
         ),
     );
@@ -63,38 +66,48 @@ pub fn init_build_local_pipeline(
 #[derive(Resource)]
 pub struct BuildLocalBindGroup(pub BindGroup);
 
+#[allow(clippy::too_many_arguments)]
 pub fn prepare_build_local_bind_group(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline: Res<BuildLocalPipeline>,
     pipeline_cache: Res<PipelineCache>,
-    occupancy: Option<Res<LocalOccupancyBuffer>>,
     params: Option<Res<BuildLocalParamsBuffer>>,
     colors: Option<Res<DroneColorsBuffer>>,
     count: Option<Res<LocalInstanceCountBuffer>>,
     instances: Option<Res<LocalInstanceVecBuffer>>,
+    active_cells: Option<Res<LocalActiveCellsBuffer>>,
+    active_count: Option<Res<LocalActiveCountBuffer>>,
     buffers: Res<RenderAssets<GpuShaderStorageBuffer>>,
 ) {
-    let (Some(occupancy), Some(params), Some(colors), Some(count), Some(instances)) =
-        (occupancy, params, colors, count, instances)
+    let (
+        Some(params),
+        Some(colors),
+        Some(count),
+        Some(instances),
+        Some(active_cells),
+        Some(active_count),
+    ) = (params, colors, count, instances, active_cells, active_count)
     else {
         return;
     };
-    let Some(occupancy_buf) = buffers.get(&occupancy.0) else { return; };
     let Some(params_buf) = buffers.get(&params.0) else { return; };
     let Some(colors_buf) = buffers.get(&colors.0) else { return; };
     let Some(count_buf) = buffers.get(&count.0) else { return; };
     let Some(instances_buf) = buffers.get(&instances.0) else { return; };
+    let Some(active_cells_buf) = buffers.get(&active_cells.0) else { return; };
+    let Some(active_count_buf) = buffers.get(&active_count.0) else { return; };
 
     let bind_group = render_device.create_bind_group(
         "build local instances bind group",
         &pipeline_cache.get_bind_group_layout(&pipeline.layout),
         &BindGroupEntries::sequential((
-            occupancy_buf.buffer.as_entire_buffer_binding(),
             params_buf.buffer.as_entire_buffer_binding(),
             colors_buf.buffer.as_entire_buffer_binding(),
             count_buf.buffer.as_entire_buffer_binding(),
             instances_buf.buffer.as_entire_buffer_binding(),
+            active_cells_buf.buffer.as_entire_buffer_binding(),
+            active_count_buf.buffer.as_entire_buffer_binding(),
         )),
     );
     commands.insert_resource(BuildLocalBindGroup(bind_group));
@@ -130,24 +143,13 @@ impl render_graph::Node for BuildLocalNode {
         let Some(compute_pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) else {
             return Ok(());
         };
-        // Halve the build cost by running every other frame. Output is
-        // a vertex buffer the render reads each frame — a one-frame
-        // staleness is invisible. Skips ~245 M thread invocations
-        // every other frame at 50 drones × 9.83 M cells.
-        let frame = world
-            .get_resource::<crate::lidar::LidarFrameCounter>()
-            .map(|c| c.0)
-            .unwrap_or(0);
-        if frame % 2 != 0 {
-            return Ok(());
-        }
-        // Use the default world dims directly to avoid needing
-        // WorldConfig in the render world. The shader bounds-checks
-        // `cell_flat >= cells_per_drone`, so a fixed-size dispatch is
-        // safe even if the world is smaller than the constant.
-        let dims = crate::world::WorldConfig::default().size;
-        let cells_per_drone = dims.x * dims.y * dims.z;
-        let groups_x = cells_per_drone.div_ceil(256);
+        // Dispatch sized to the per-drone active-cell list cap, not the
+        // whole world. Each thread reads its slot from the list +
+        // emits an instance (atomically reserving a slot in the
+        // instance buffer). Threads with slot >= live count early-
+        // return; GPU handles that cheaply. 50 drones × 200 K slots /
+        // 256 = 39 K workgroups vs the old 1.92 M workgroups.
+        let groups_x = MAX_LOCAL_ACTIVE_PER_DRONE.div_ceil(256);
         let groups_y = super::resources::MAX_DRONES_GPU;
 
         let encoder = render_context.command_encoder();

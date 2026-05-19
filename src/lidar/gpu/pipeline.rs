@@ -50,6 +50,15 @@ pub fn init_compute_lidar_pipeline(
                 // here directly (comms-gated) so merge_global is
                 // retired.
                 storage_buffer::<Vec<u32>>(false),
+                // 11: per-drone active-cell list (cell flat-indices
+                // appended on first Unknown->Occupied transition).
+                storage_buffer::<Vec<u32>>(false),
+                // 12: per-drone active-cell count (atomic).
+                storage_buffer::<Vec<u32>>(false),
+                // 13: global active-cell list.
+                storage_buffer::<Vec<u32>>(false),
+                // 14: global active-cell count (atomic).
+                storage_buffer::<Vec<u32>>(false),
             ),
         ),
     );

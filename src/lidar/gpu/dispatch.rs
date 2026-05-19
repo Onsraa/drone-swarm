@@ -1,3 +1,4 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_graph::{
@@ -12,16 +13,32 @@ use bevy::render::storage::GpuShaderStorageBuffer;
 use super::per_drone_scan::DroneScanParamsBuffer;
 use super::pipeline::ComputeLidarPipeline;
 use super::resources::{
-    DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer, GlobalOccupancyBuffer,
-    GroundTruthBuffer, LidarParamsBuffer, LidarPointCountBuffer, LidarPointVecBuffer,
+    DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer, GlobalActiveCellsBuffer,
+    GlobalActiveCountBuffer, GlobalOccupancyBuffer, GroundTruthBuffer, LidarParamsBuffer,
+    LidarPointCountBuffer, LidarPointVecBuffer, LocalActiveCellsBuffer, LocalActiveCountBuffer,
     LocalOccupancyBuffer, RayDirsBuffer, MAX_DRONES_GPU,
 };
 use crate::lidar::{LidarFrameCounter, LidarSettings};
 
+/// Bundles the active-list buffer handles + point-cloud buffers so
+/// `prepare_lidar_bind_group` stays within Bevy's 16-parameter system
+/// limit (the lidar bind group has 15 SSBO bindings + RenderDevice +
+/// pipeline + cache + commands + buffers + ...).
+#[derive(SystemParam)]
+pub(crate) struct LidarExtraBuffers<'w> {
+    pub point_count: Option<Res<'w, LidarPointCountBuffer>>,
+    pub point_vec: Option<Res<'w, LidarPointVecBuffer>>,
+    pub scan_params: Option<Res<'w, DroneScanParamsBuffer>>,
+    pub global_occupancy: Option<Res<'w, GlobalOccupancyBuffer>>,
+    pub local_active_cells: Option<Res<'w, LocalActiveCellsBuffer>>,
+    pub local_active_count: Option<Res<'w, LocalActiveCountBuffer>>,
+    pub global_active_cells: Option<Res<'w, GlobalActiveCellsBuffer>>,
+    pub global_active_count: Option<Res<'w, GlobalActiveCountBuffer>>,
+}
+
 #[derive(Resource)]
 pub struct LidarBindGroup(pub BindGroup);
 
-#[allow(clippy::too_many_arguments)]
 pub fn prepare_lidar_bind_group(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
@@ -34,10 +51,7 @@ pub fn prepare_lidar_bind_group(
     dirs: Option<Res<RayDirsBuffer>>,
     occupancy: Option<Res<LocalOccupancyBuffer>>,
     colors: Option<Res<DroneColorsBuffer>>,
-    point_count: Option<Res<LidarPointCountBuffer>>,
-    point_vec: Option<Res<LidarPointVecBuffer>>,
-    scan_params: Option<Res<DroneScanParamsBuffer>>,
-    global_occupancy: Option<Res<GlobalOccupancyBuffer>>,
+    extras: LidarExtraBuffers,
     buffers: Res<RenderAssets<GpuShaderStorageBuffer>>,
 ) {
     let (
@@ -52,6 +66,10 @@ pub fn prepare_lidar_bind_group(
         Some(point_vec),
         Some(scan_params),
         Some(global_occupancy),
+        Some(local_active_cells),
+        Some(local_active_count),
+        Some(global_active_cells),
+        Some(global_active_count),
     ) = (
         ground,
         params,
@@ -60,10 +78,14 @@ pub fn prepare_lidar_bind_group(
         dirs,
         occupancy,
         colors,
-        point_count,
-        point_vec,
-        scan_params,
-        global_occupancy,
+        extras.point_count,
+        extras.point_vec,
+        extras.scan_params,
+        extras.global_occupancy,
+        extras.local_active_cells,
+        extras.local_active_count,
+        extras.global_active_cells,
+        extras.global_active_count,
     ) else {
         return;
     };
@@ -78,6 +100,10 @@ pub fn prepare_lidar_bind_group(
     let Some(point_vec_buf) = buffers.get(&point_vec.0) else { return; };
     let Some(scan_params_buf) = buffers.get(&scan_params.0) else { return; };
     let Some(global_occupancy_buf) = buffers.get(&global_occupancy.0) else { return; };
+    let Some(local_active_cells_buf) = buffers.get(&local_active_cells.0) else { return; };
+    let Some(local_active_count_buf) = buffers.get(&local_active_count.0) else { return; };
+    let Some(global_active_cells_buf) = buffers.get(&global_active_cells.0) else { return; };
+    let Some(global_active_count_buf) = buffers.get(&global_active_count.0) else { return; };
 
     let bind_group = render_device.create_bind_group(
         "compute lidar bind group",
@@ -94,6 +120,10 @@ pub fn prepare_lidar_bind_group(
             point_vec_buf.buffer.as_entire_buffer_binding(),
             scan_params_buf.buffer.as_entire_buffer_binding(),
             global_occupancy_buf.buffer.as_entire_buffer_binding(),
+            local_active_cells_buf.buffer.as_entire_buffer_binding(),
+            local_active_count_buf.buffer.as_entire_buffer_binding(),
+            global_active_cells_buf.buffer.as_entire_buffer_binding(),
+            global_active_count_buf.buffer.as_entire_buffer_binding(),
         )),
     );
     commands.insert_resource(LidarBindGroup(bind_group));
