@@ -9,17 +9,14 @@ use bevy::prelude::*;
 pub use gpu::GpuLidarPlugin;
 pub use resources::{LidarFrameCounter, LidarSettings};
 
-use sampling::LidarRayDirs;
-
-/// Holds the cached fibonacci-cone ray directions used by the GPU lidar
-/// shader plus the runtime-tunable `LidarSettings`. Per-frame upload
-/// systems live in `gpu::*`.
+/// Owns the runtime-tunable `LidarSettings` + frame counter. Ray-set
+/// content lives in `sampling::build_role_ray_buffer`, called by
+/// `setup_gpu_lidar_assets` to populate the GPU buffer at startup.
 pub struct LidarPlugin;
 
 impl Plugin for LidarPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(LidarRayDirs::default_for_scan())
-            .init_resource::<LidarSettings>()
+        app.init_resource::<LidarSettings>()
             .init_resource::<LidarFrameCounter>()
             .add_systems(Update, tick_frame_counter);
     }

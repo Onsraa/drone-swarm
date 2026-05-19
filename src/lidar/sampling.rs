@@ -1,27 +1,6 @@
 use bevy::prelude::*;
 
-use super::constants::{LIDAR_CONE_HALF_ANGLE_DEGREES, RAYS_PER_SCAN};
-use crate::exploration::Role;
-
-/// Precomputed ray directions for each lidar scan. Stored in the drone's
-/// local frame, with the cone axis aligned to Bevy's body-forward (`-Z`);
-/// `lidar_scan` rotates each direction by the drone's transform before
-/// casting.
-#[derive(Resource)]
-pub struct LidarRayDirs(pub Vec<Vec3>);
-
-impl LidarRayDirs {
-    pub fn forward_cone(n: usize, half_angle_rad: f32) -> Self {
-        Self(fibonacci_cone(n, half_angle_rad))
-    }
-
-    pub fn default_for_scan() -> Self {
-        Self::forward_cone(
-            RAYS_PER_SCAN,
-            LIDAR_CONE_HALF_ANGLE_DEGREES.to_radians(),
-        )
-    }
-}
+use crate::exploration::{Role, RoleParams};
 
 #[derive(Clone, Copy, Debug)]
 pub struct RoleConeRange {
@@ -30,31 +9,33 @@ pub struct RoleConeRange {
     pub count: u32,
 }
 
+/// Concatenate one fibonacci cone per role into a single ray buffer.
+/// Each role's cone half-angle + ray count come from `RoleParams` so the
+/// role table is the single source of truth for sensor shape.
 pub fn build_role_ray_buffer() -> (Vec<Vec3>, [RoleConeRange; 3]) {
-    let scout = fibonacci_cone(32, 15.0_f32.to_radians());
-    let mapper = fibonacci_cone(128, 90.0_f32.to_radians());
-    let anchor = fibonacci_cone(64, 180.0_f32.to_radians());
-    let mut all = Vec::with_capacity(scout.len() + mapper.len() + anchor.len());
-    let ranges = [
-        RoleConeRange {
-            role: Role::Scout,
-            offset: 0,
-            count: scout.len() as u32,
-        },
-        RoleConeRange {
-            role: Role::Mapper,
-            offset: scout.len() as u32,
-            count: mapper.len() as u32,
-        },
-        RoleConeRange {
-            role: Role::Anchor,
-            offset: (scout.len() + mapper.len()) as u32,
-            count: anchor.len() as u32,
-        },
-    ];
-    all.extend(scout);
-    all.extend(mapper);
-    all.extend(anchor);
+    let roles = [Role::Scout, Role::Mapper, Role::Anchor];
+    let mut all: Vec<Vec3> = Vec::new();
+    let mut ranges = [RoleConeRange {
+        role: Role::Scout,
+        offset: 0,
+        count: 0,
+    }; 3];
+    let mut offset = 0u32;
+    for (i, role) in roles.iter().enumerate() {
+        let params = RoleParams::for_role(*role);
+        let dirs = fibonacci_cone(
+            params.rays_per_scan as usize,
+            params.cone_half_angle_deg.to_radians(),
+        );
+        let count = dirs.len() as u32;
+        ranges[i] = RoleConeRange {
+            role: *role,
+            offset,
+            count,
+        };
+        all.extend(dirs);
+        offset += count;
+    }
     (all, ranges)
 }
 

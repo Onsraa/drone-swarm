@@ -11,6 +11,9 @@ use super::role::Role;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SwarmTelemetry {
+    /// Total drones in the swarm. Recorded for tests + future telemetry
+    /// readouts; not read by `decide_ratio` itself (which scales by ratios).
+    #[allow(dead_code)]
     pub total_drones: u32,
     pub comms_components: u32,
     pub comms_density: f32,
@@ -22,6 +25,10 @@ pub struct SwarmTelemetry {
 pub struct TargetRatio {
     pub scouts: f32,
     pub mappers: f32,
+    /// Anchor share of the ratio. Held for completeness + tests; the
+    /// scout + mapper cutoffs in `role_for_ratio` derive the anchor
+    /// region by remainder.
+    #[allow(dead_code)]
     pub anchors: f32,
 }
 

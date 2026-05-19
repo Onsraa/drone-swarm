@@ -4,6 +4,10 @@ use bevy::prelude::*;
 pub struct FrontierCluster {
     pub id: u32,
     pub centroid: Vec3,
+    /// Cells inside the cluster. Populated by `build_clusters`; tests
+    /// inspect it. Production consumers (anchor placement, info-gain
+    /// refinement) are queued for future work.
+    #[allow(dead_code)]
     pub cells: Vec<UVec3>,
     pub info_gain: f32,
     pub bbox_min: UVec3,

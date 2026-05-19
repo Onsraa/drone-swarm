@@ -9,20 +9,12 @@ pub struct FrontierTarget {
 }
 
 /// Planned waypoint sequence in world coords. Empty = no plan; `wander`
-/// fallback drives the drone. Pure-pursuit consumes this.
+/// fallback drives the drone. Pure-pursuit consumes `waypoints` + `cursor`
+/// directly; no helper methods needed.
 #[derive(Component, Default, Debug)]
 pub struct Path {
     pub waypoints: Vec<Vec3>,
     pub cursor: usize,
-}
-
-impl Path {
-    pub fn is_empty(&self) -> bool {
-        self.cursor >= self.waypoints.len()
-    }
-    pub fn next(&self) -> Option<Vec3> {
-        self.waypoints.get(self.cursor).copied()
-    }
 }
 
 /// Stuck detector state per drone.

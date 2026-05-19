@@ -12,7 +12,7 @@ pub mod systems;
 use bevy::prelude::*;
 
 pub use components::{FrontierTarget, MovementHealth, Path};
-pub use resources::{CoarseCell, FrontierCluster, FrontierClusters, PlannerGrid};
+pub use resources::{FrontierClusters, PlannerGrid};
 pub use role::{Role, RoleParams};
 pub use supervisor::{LastRoleChange, SupervisorTimer};
 pub use systems::ReplanTimer;

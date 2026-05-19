@@ -54,11 +54,12 @@ pub fn reactive_force(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::constants::{AVOID_K_DEFAULT, AVOID_RADIUS_M};
+    use super::super::constants::AVOID_RADIUS_M;
+    const TEST_AVOID_K: f32 = 6.0;
 
     #[test]
     fn no_obstacles_no_force() {
-        let f = reactive_force(Vec3::ZERO, &[], &[], AVOID_K_DEFAULT);
+        let f = reactive_force(Vec3::ZERO, &[], &[], TEST_AVOID_K);
         assert_eq!(f, Vec3::ZERO);
     }
 
@@ -66,8 +67,8 @@ mod tests {
     fn closer_obstacle_pushes_harder() {
         let near = vec![Vec3::new(1.0, 0.0, 0.0)];
         let far = vec![Vec3::new(3.5, 0.0, 0.0)];
-        let f_near = reactive_force(Vec3::ZERO, &near, &[], AVOID_K_DEFAULT);
-        let f_far = reactive_force(Vec3::ZERO, &far, &[], AVOID_K_DEFAULT);
+        let f_near = reactive_force(Vec3::ZERO, &near, &[], TEST_AVOID_K);
+        let f_far = reactive_force(Vec3::ZERO, &far, &[], TEST_AVOID_K);
         assert!(f_near.length() > f_far.length());
         // Force should point away (negative x since obstacle is at +x).
         assert!(f_near.x < 0.0);
@@ -76,7 +77,7 @@ mod tests {
     #[test]
     fn outside_radius_ignored() {
         let way_far = vec![Vec3::new(AVOID_RADIUS_M + 1.0, 0.0, 0.0)];
-        let f = reactive_force(Vec3::ZERO, &way_far, &[], AVOID_K_DEFAULT);
+        let f = reactive_force(Vec3::ZERO, &way_far, &[], TEST_AVOID_K);
         assert_eq!(f, Vec3::ZERO);
     }
 

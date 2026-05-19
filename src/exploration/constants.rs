@@ -12,23 +12,18 @@ pub const PLANNER_DEEP_UNKNOWN_MULT: f32 = 5.0;
 pub const REPLAN_MIN_INTERVAL_SECS: f32 = 1.0;
 
 // Steering
-pub const LOOKAHEAD_M: f32 = 8.0;
 pub const PATH_FOLLOW_LERP_RATE: f32 = 3.0;
 pub const AVOID_RADIUS_M: f32 = 4.0;
 pub const AVOID_RADIUS_PEER_M: f32 = 6.0;
-pub const AVOID_K_DEFAULT: f32 = 6.0;
 
 // Stuck detection
 pub const STUCK_VEL_MPS: f32 = 0.5;
 pub const STUCK_SECS: f32 = 3.0;
 pub const STUCK_ESCALATION_WINDOW_SECS: f32 = 20.0;
 
-// Scoring (role-agnostic Phase 1 defaults)
+// Scoring (role-agnostic Phase 1 defaults; per-role weights live in RoleParams)
 pub const SCORE_INFO_WEIGHT: f32 = 1.0;
 pub const SCORE_DISTANCE_WEIGHT: f32 = 1.0;
 pub const SCORE_DISTANCE_BIAS: f32 = 1.0;
 pub const SCORE_CROWDING_WEIGHT: f32 = 1.0;
 pub const SCORE_UPGRADE_RATIO: f32 = 1.5;
-
-// Cruise (Phase 1 single speed; Phase 2 overrides per role)
-pub const DEFAULT_CRUISE_SPEED_MPS: f32 = 5.0;
