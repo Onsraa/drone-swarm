@@ -11,6 +11,7 @@ use bevy::prelude::*;
 
 pub use components::{FrontierTarget, MovementHealth, Path};
 pub use resources::{CoarseCell, FrontierCluster, FrontierClusters, PlannerGrid};
+pub use systems::ReplanTimer;
 
 use crate::physics::PhysicsSet;
 use systems::{
