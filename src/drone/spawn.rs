@@ -5,6 +5,7 @@ use bevy::gltf::GltfAssetLabel;
 use bevy::prelude::*;
 use rand::{Rng, RngExt};
 
+use crate::frontier::FrontierTarget;
 use crate::physics::{DesiredAttitude, DesiredVelocity, LinearVelocity, ThrustState};
 use crate::world::WorldConfig;
 
@@ -68,6 +69,7 @@ fn spawn_one_drone(
                 TimerMode::Repeating,
             )),
             WanderTarget::default(),
+            FrontierTarget::default(),
             Transform::from_translation(spawn_pos).with_scale(Vec3::splat(DRONE_SCALE)),
             Visibility::default(),
         ))

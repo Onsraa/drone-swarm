@@ -48,6 +48,15 @@ pub struct GpuGlobalStats {
     pub occupied: usize,
 }
 
+/// CPU-side mirror of the raw global occupancy bitset (2 bits per cell,
+/// 16 cells per u32 word). Updated by the same Readback observer that
+/// drives `GpuGlobalStats`; downstream consumers (frontier exploration)
+/// decode the 2-bit states to find Unknown/Free transitions.
+#[derive(Resource, Default, Clone, Debug)]
+pub struct GpuGlobalOccupancyMirror {
+    pub data: Vec<u32>,
+}
+
 /// Owns all the GPU lidar storage buffers, compute pipelines, and the
 /// render-graph nodes that schedule them (lidar -> merge_global ->
 /// build_global; lidar -> build_local). All map state lives on the GPU;
@@ -58,6 +67,7 @@ pub struct GpuLidarPlugin;
 impl Plugin for GpuLidarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GpuGlobalStats>()
+            .init_resource::<GpuGlobalOccupancyMirror>()
             .add_plugins(ExtractResourcePlugin::<GroundTruthBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LidarParamsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<DronePositionsBuffer>::default())
@@ -229,7 +239,9 @@ fn spawn_global_stats_readback(
     commands
         .spawn(Readback::buffer(occupancy.0.clone()))
         .observe(
-            |event: On<ReadbackComplete>, mut stats: ResMut<GpuGlobalStats>| {
+            |event: On<ReadbackComplete>,
+             mut stats: ResMut<GpuGlobalStats>,
+             mut mirror: ResMut<GpuGlobalOccupancyMirror>| {
                 let data: Vec<u32> = event.to_shader_type();
                 let mut free = 0usize;
                 let mut occupied = 0usize;
@@ -245,6 +257,7 @@ fn spawn_global_stats_readback(
                 }
                 stats.free = free;
                 stats.occupied = occupied;
+                mirror.data = data;
             },
         );
 }
