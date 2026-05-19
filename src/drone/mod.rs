@@ -7,7 +7,7 @@ mod wander;
 
 use bevy::prelude::*;
 
-pub use components::{Drone, DroneColor};
+pub use components::{Drone, DroneColor, DroneId};
 pub use constants::{MAX_DRONE_COUNT, MIN_DRONE_COUNT};
 pub use resources::DroneSpawnConfig;
 

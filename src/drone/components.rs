@@ -4,7 +4,6 @@ use bevy::prelude::*;
 pub struct Drone;
 
 #[derive(Component)]
-#[allow(dead_code)]
 pub struct DroneId(pub u32);
 
 #[derive(Component)]

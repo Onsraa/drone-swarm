@@ -1,10 +1,8 @@
-// Stage 3 GPU lidar. One thread per (drone, ray). Walks Amanatides-Woo
-// through the ground-truth bitset and writes the traversal trail to the
-// hits buffer. Per-step entries pack (state << 30) | (flat_cell_idx).
-// State encoding:
-//   0u = sentinel / unwritten
-//   1u = Free  (cell visited, ground bit unset)
-//   2u = Occupied (cell visited, ground bit set; trail ends here)
+// Stage 4 GPU lidar. One thread per (drone, ray). The ray direction is
+// stored in the drone's local frame (forward = -Z), rotated by the
+// drone's world-quaternion before traversal so each drone sweeps its
+// own forward cone. Trail entries pack (state << 30) | flat_cell_idx.
+// State encoding: 0 = sentinel, 1 = Free, 2 = Occupied.
 //
 // Layout: hits[(drone * rays + ray) * max_steps + step].
 
@@ -21,6 +19,7 @@ struct LidarParams {
 @group(0) @binding(2) var<storage, read> drone_positions: array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read> ray_dirs: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read_write> hits: array<u32>;
+@group(0) @binding(5) var<storage, read> drone_orientations: array<vec4<f32>>;
 
 fn cell_flat_idx(cell: vec3<i32>) -> u32 {
     return u32(cell.x)
@@ -64,6 +63,13 @@ fn axis_t_max(step_sign: i32, origin: f32, cell: i32, dir: f32) -> f32 {
     return boundary / abs(dir);
 }
 
+// Rotate `v` by quaternion `q` stored as (x, y, z, w).
+fn quat_rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    let qv = vec3<f32>(q.x, q.y, q.z);
+    let t = 2.0 * cross(qv, v);
+    return v + q.w * t + cross(qv, t);
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn lidar(@builtin(global_invocation_id) gid: vec3<u32>) {
     let drone_idx = gid.x;
@@ -73,24 +79,25 @@ fn lidar(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     let origin = drone_positions[drone_idx].xyz;
-    let dir = normalize(ray_dirs[ray_idx].xyz);
+    let local_dir = ray_dirs[ray_idx].xyz;
+    let world_dir = normalize(quat_rotate(drone_orientations[drone_idx], local_dir));
     let out_base = (drone_idx * params.rays_per_scan + ray_idx) * params.max_steps;
 
     var cell = vec3<i32>(floor(origin));
     let step_sign = vec3<i32>(
-        i32(sign(dir.x)),
-        i32(sign(dir.y)),
-        i32(sign(dir.z)),
+        i32(sign(world_dir.x)),
+        i32(sign(world_dir.y)),
+        i32(sign(world_dir.z)),
     );
     var t_max = vec3<f32>(
-        axis_t_max(step_sign.x, origin.x, cell.x, dir.x),
-        axis_t_max(step_sign.y, origin.y, cell.y, dir.y),
-        axis_t_max(step_sign.z, origin.z, cell.z, dir.z),
+        axis_t_max(step_sign.x, origin.x, cell.x, world_dir.x),
+        axis_t_max(step_sign.y, origin.y, cell.y, world_dir.y),
+        axis_t_max(step_sign.z, origin.z, cell.z, world_dir.z),
     );
     let t_delta = vec3<f32>(
-        select(1e30, 1.0 / abs(dir.x), dir.x != 0.0),
-        select(1e30, 1.0 / abs(dir.y), dir.y != 0.0),
-        select(1e30, 1.0 / abs(dir.z), dir.z != 0.0),
+        select(1e30, 1.0 / abs(world_dir.x), world_dir.x != 0.0),
+        select(1e30, 1.0 / abs(world_dir.y), world_dir.y != 0.0),
+        select(1e30, 1.0 / abs(world_dir.z), world_dir.z != 0.0),
     );
 
     var step: u32 = 0u;
@@ -107,7 +114,6 @@ fn lidar(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
 
         if (occupied || !in_bounds) {
-            // Sentinel-fill the remainder so CPU readers can scan to first zero.
             var s = step + 1u;
             loop {
                 if (s >= params.max_steps) { break; }

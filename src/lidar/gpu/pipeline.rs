@@ -35,6 +35,8 @@ pub fn init_compute_lidar_pipeline(
                 storage_buffer_read_only::<Vec<Vec4>>(false),
                 // 4: hits output
                 storage_buffer::<Vec<u32>>(false),
+                // 5: drone orientations (Vec<Vec4>, quaternion xyzw)
+                storage_buffer_read_only::<Vec<Vec4>>(false),
             ),
         ),
     );
