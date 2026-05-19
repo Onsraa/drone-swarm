@@ -23,21 +23,20 @@ use rand::RngExt;
 pub fn assign_targets(
     clusters: Res<FrontierClusters>,
     comms: Res<CommsState>,
-    mut q_self: Query<(&DroneId, &Transform, &mut FrontierTarget), With<Drone>>,
-    q_peers: Query<(&DroneId, &Transform, &FrontierTarget), With<Drone>>,
+    mut q: Query<(&DroneId, &Transform, &mut FrontierTarget), With<Drone>>,
 ) {
     if clusters.entries.is_empty() {
         return;
     }
     // Snapshot peer positions + targets keyed by id for crowding lookups.
-    let peers: Vec<(u32, Vec3, Option<u32>)> = q_peers
+    let peers: Vec<(u32, Vec3, Option<u32>)> = q
         .iter()
         .map(|(id, t, ft)| (id.0, t.translation, ft.cluster_id))
         .collect();
 
     let weights = ScoringWeights::default();
 
-    for (id, transform, mut target) in &mut q_self {
+    for (id, transform, mut target) in &mut q {
         let drone_pos = transform.translation;
         // Filter peers to the comms cluster of the deciding drone.
         let half = (id.0 >= 32) as usize;
