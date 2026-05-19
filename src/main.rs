@@ -9,6 +9,7 @@ mod drone;
 mod frontier;
 mod lidar;
 mod lighting;
+mod maps;
 mod physics;
 mod render;
 mod ui;
@@ -20,6 +21,7 @@ use drone::DronePlugin;
 use frontier::FrontierPlugin;
 use lidar::{GpuLidarPlugin, LidarPlugin};
 use lighting::LightingPlugin;
+use maps::MapsPlugin;
 use physics::PhysicsPlugin;
 use render::VoxelRenderPlugin;
 use ui::UiPlugin;
@@ -38,6 +40,7 @@ fn main() {
         }))
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(EguiPlugin::default())
+        .add_plugins(MapsPlugin)
         .add_plugins(WorldPlugin)
         .add_plugins(LightingPlugin)
         .add_plugins(VoxelRenderPlugin)

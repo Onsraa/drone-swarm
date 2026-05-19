@@ -63,4 +63,19 @@ impl GroundTruthMap {
         }
         out
     }
+
+    /// Inverse of `pack_bitset`: build a fresh map of `dims` by reading
+    /// occupancy from a packed `u32` bitset. Used by the map-swap path
+    /// when loading a `.dvm` asset.
+    pub fn from_bitset(dims: UVec3, bitset: &[u32]) -> Self {
+        let n = (dims.x * dims.y * dims.z) as usize;
+        let mut cells = vec![false; n];
+        for (i, slot) in cells.iter_mut().enumerate() {
+            let w = i / 32;
+            if w < bitset.len() && (bitset[w] >> (i % 32)) & 1 == 1 {
+                *slot = true;
+            }
+        }
+        Self { dims, cells }
+    }
 }

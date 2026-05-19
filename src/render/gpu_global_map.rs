@@ -62,18 +62,20 @@ impl Plugin for GpuGlobalMapPlugin {
     }
 }
 
+#[derive(Component)]
+pub struct GlobalCountReadbackTag;
+
 fn spawn_gpu_global_map_voxel(
     mut commands: Commands,
     cube: Option<Res<CubeMesh>>,
-    mut spawned: Local<bool>,
+    existing: Query<(), With<GpuGlobalMapVoxel>>,
 ) {
-    if *spawned {
+    if !existing.is_empty() {
         return;
     }
     let Some(cube) = cube else {
         return;
     };
-    *spawned = true;
     commands.spawn((
         GpuGlobalMapVoxel,
         Mesh3d(cube.0.clone()),
@@ -86,17 +88,19 @@ fn spawn_gpu_global_map_voxel(
 fn spawn_global_count_readback(
     mut commands: Commands,
     count_handle: Option<Res<GlobalInstanceCountBuffer>>,
-    mut spawned: Local<bool>,
+    existing: Query<(), With<GlobalCountReadbackTag>>,
 ) {
-    if *spawned {
+    if !existing.is_empty() {
         return;
     }
     let Some(count_handle) = count_handle else {
         return;
     };
-    *spawned = true;
     commands
-        .spawn(Readback::buffer(count_handle.0.clone()))
+        .spawn((
+            Readback::buffer(count_handle.0.clone()),
+            GlobalCountReadbackTag,
+        ))
         .observe(
             |event: On<ReadbackComplete>, mut count: ResMut<GpuGlobalInstanceCount>| {
                 let data: Vec<u32> = event.to_shader_type();
@@ -109,11 +113,14 @@ fn spawn_global_count_readback(
 
 fn prepare_gpu_global_instance_buffer(
     mut commands: Commands,
-    instances_handle: Res<GlobalInstanceVecBuffer>,
+    instances_handle: Option<Res<GlobalInstanceVecBuffer>>,
     count: Res<GpuGlobalInstanceCount>,
     buffers: Res<RenderAssets<GpuShaderStorageBuffer>>,
     layers: Query<Entity, With<GpuGlobalMapVoxelTag>>,
 ) {
+    let Some(instances_handle) = instances_handle else {
+        return;
+    };
     let Some(buf) = buffers.get(&instances_handle.0) else {
         return;
     };

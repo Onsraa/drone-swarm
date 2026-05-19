@@ -24,12 +24,7 @@ impl Plugin for VoxelRenderPlugin {
         app.add_plugins(InstancedVoxelPlugin)
             .add_plugins(GpuLocalMapPlugin)
             .add_plugins(GpuGlobalMapPlugin)
-            .add_systems(
-                Startup,
-                (
-                    init_voxel_assets,
-                    spawn_ground_truth_layer.after(init_voxel_assets),
-                ),
-            );
+            .add_systems(Startup, init_voxel_assets)
+            .add_systems(Update, spawn_ground_truth_layer);
     }
 }

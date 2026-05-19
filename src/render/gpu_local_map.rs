@@ -76,22 +76,27 @@ impl Plugin for GpuLocalMapPlugin {
     }
 }
 
+/// Marker on the Readback observer entity for the local instance
+/// counter. Used by `apply_map_swap` to despawn the observer (which
+/// holds a stale buffer handle) so a new one can attach to the
+/// reallocated buffer on the next frame.
+#[derive(Component)]
+pub struct LocalCountReadbackTag;
+
 /// Spawn the single layer entity whose vertex buffer is the GPU-built
-/// instance buffer. No `InstancedVoxelLayer` (so the CPU prepare/queue
-/// systems skip it) and no `Material` (so Bevy's standard mesh pipeline
-/// skips it).
+/// instance buffer. Gated on entity existence so map swap can despawn
+/// it and have it respawn automatically next frame.
 fn spawn_gpu_local_map_voxel(
     mut commands: Commands,
     cube: Option<Res<CubeMesh>>,
-    mut spawned: Local<bool>,
+    existing: Query<(), With<GpuLocalMapVoxel>>,
 ) {
-    if *spawned {
+    if !existing.is_empty() {
         return;
     }
     let Some(cube) = cube else {
         return;
     };
-    *spawned = true;
     commands.spawn((
         GpuLocalMapVoxel,
         Mesh3d(cube.0.clone()),
@@ -104,17 +109,16 @@ fn spawn_gpu_local_map_voxel(
 fn spawn_count_readback(
     mut commands: Commands,
     count_handle: Option<Res<LocalInstanceCountBuffer>>,
-    mut spawned: Local<bool>,
+    existing: Query<(), With<LocalCountReadbackTag>>,
 ) {
-    if *spawned {
+    if !existing.is_empty() {
         return;
     }
     let Some(count_handle) = count_handle else {
         return;
     };
-    *spawned = true;
     commands
-        .spawn(Readback::buffer(count_handle.0.clone()))
+        .spawn((Readback::buffer(count_handle.0.clone()), LocalCountReadbackTag))
         .observe(
             |event: On<ReadbackComplete>, mut count: ResMut<GpuLocalInstanceCount>| {
                 let data: Vec<u32> = event.to_shader_type();
@@ -130,11 +134,14 @@ fn spawn_count_readback(
 /// component matches the layout `DrawVoxelInstanced` already expects.
 fn prepare_gpu_local_instance_buffer(
     mut commands: Commands,
-    instances_handle: Res<LocalInstanceVecBuffer>,
+    instances_handle: Option<Res<LocalInstanceVecBuffer>>,
     count: Res<GpuLocalInstanceCount>,
     buffers: Res<RenderAssets<GpuShaderStorageBuffer>>,
     layers: Query<Entity, With<GpuLocalMapVoxelTag>>,
 ) {
+    let Some(instances_handle) = instances_handle else {
+        return;
+    };
     let Some(buf) = buffers.get(&instances_handle.0) else {
         return;
     };

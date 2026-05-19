@@ -24,14 +24,19 @@ pub fn prepare_lidar_bind_group(
     render_device: Res<RenderDevice>,
     pipeline: Res<ComputeLidarPipeline>,
     pipeline_cache: Res<PipelineCache>,
-    ground: Res<GroundTruthBuffer>,
-    params: Res<LidarParamsBuffer>,
-    positions: Res<DronePositionsBuffer>,
-    orientations: Res<DroneOrientationsBuffer>,
-    dirs: Res<RayDirsBuffer>,
-    occupancy: Res<LocalOccupancyBuffer>,
+    ground: Option<Res<GroundTruthBuffer>>,
+    params: Option<Res<LidarParamsBuffer>>,
+    positions: Option<Res<DronePositionsBuffer>>,
+    orientations: Option<Res<DroneOrientationsBuffer>>,
+    dirs: Option<Res<RayDirsBuffer>>,
+    occupancy: Option<Res<LocalOccupancyBuffer>>,
     buffers: Res<RenderAssets<GpuShaderStorageBuffer>>,
 ) {
+    let (Some(ground), Some(params), Some(positions), Some(orientations), Some(dirs), Some(occupancy)) =
+        (ground, params, positions, orientations, dirs, occupancy)
+    else {
+        return;
+    };
     let Some(ground_buf) = buffers.get(&ground.0) else { return; };
     let Some(params_buf) = buffers.get(&params.0) else { return; };
     let Some(positions_buf) = buffers.get(&positions.0) else { return; };

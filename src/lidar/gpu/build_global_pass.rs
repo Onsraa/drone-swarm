@@ -66,12 +66,17 @@ pub fn prepare_build_global_bind_group(
     render_device: Res<RenderDevice>,
     pipeline: Res<BuildGlobalPipeline>,
     pipeline_cache: Res<PipelineCache>,
-    occupancy: Res<GlobalOccupancyBuffer>,
-    params: Res<BuildLocalParamsBuffer>,
-    count: Res<GlobalInstanceCountBuffer>,
-    instances: Res<GlobalInstanceVecBuffer>,
+    occupancy: Option<Res<GlobalOccupancyBuffer>>,
+    params: Option<Res<BuildLocalParamsBuffer>>,
+    count: Option<Res<GlobalInstanceCountBuffer>>,
+    instances: Option<Res<GlobalInstanceVecBuffer>>,
     buffers: Res<RenderAssets<GpuShaderStorageBuffer>>,
 ) {
+    let (Some(occupancy), Some(params), Some(count), Some(instances)) =
+        (occupancy, params, count, instances)
+    else {
+        return;
+    };
     let Some(occupancy_buf) = buffers.get(&occupancy.0) else { return; };
     let Some(params_buf) = buffers.get(&params.0) else { return; };
     let Some(count_buf) = buffers.get(&count.0) else { return; };

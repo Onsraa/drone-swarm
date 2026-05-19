@@ -32,7 +32,7 @@ pub fn draw_ui(
             ui.separator();
 
             ui.label("Layers");
-            ui.checkbox(&mut state.show_ground_truth, "Show ground truth");
+            ui.checkbox(&mut state.show_ground_truth, "Show ground truth (debug)");
             ui.checkbox(&mut state.show_local_maps, "Show drone local maps");
             ui.checkbox(&mut state.show_global_map, "Show central map");
             ui.separator();

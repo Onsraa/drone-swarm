@@ -68,13 +68,18 @@ pub fn prepare_build_local_bind_group(
     render_device: Res<RenderDevice>,
     pipeline: Res<BuildLocalPipeline>,
     pipeline_cache: Res<PipelineCache>,
-    occupancy: Res<LocalOccupancyBuffer>,
-    params: Res<BuildLocalParamsBuffer>,
-    colors: Res<DroneColorsBuffer>,
-    count: Res<LocalInstanceCountBuffer>,
-    instances: Res<LocalInstanceVecBuffer>,
+    occupancy: Option<Res<LocalOccupancyBuffer>>,
+    params: Option<Res<BuildLocalParamsBuffer>>,
+    colors: Option<Res<DroneColorsBuffer>>,
+    count: Option<Res<LocalInstanceCountBuffer>>,
+    instances: Option<Res<LocalInstanceVecBuffer>>,
     buffers: Res<RenderAssets<GpuShaderStorageBuffer>>,
 ) {
+    let (Some(occupancy), Some(params), Some(colors), Some(count), Some(instances)) =
+        (occupancy, params, colors, count, instances)
+    else {
+        return;
+    };
     let Some(occupancy_buf) = buffers.get(&occupancy.0) else { return; };
     let Some(params_buf) = buffers.get(&params.0) else { return; };
     let Some(colors_buf) = buffers.get(&colors.0) else { return; };

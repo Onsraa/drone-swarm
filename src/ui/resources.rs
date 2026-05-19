@@ -12,7 +12,7 @@ impl Default for UiState {
         Self {
             show_ground_truth: false,
             show_local_maps: true,
-            show_global_map: false,
+            show_global_map: true,
         }
     }
 }

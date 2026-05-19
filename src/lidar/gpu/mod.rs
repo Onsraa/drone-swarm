@@ -6,8 +6,10 @@ mod pipeline;
 mod resources;
 
 pub use resources::{
-    GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, GlobalOccupancyBuffer,
-    LocalInstanceCountBuffer, LocalInstanceVecBuffer,
+    BuildLocalParamsBuffer, DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer,
+    GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, GlobalOccupancyBuffer, GroundTruthBuffer,
+    LidarParamsBuffer, LocalInstanceCountBuffer, LocalInstanceVecBuffer, LocalOccupancyBuffer,
+    RayDirsBuffer,
 };
 
 use bevy::prelude::*;
@@ -32,9 +34,8 @@ use merge_pass::{
 };
 use pipeline::init_compute_lidar_pipeline;
 use resources::{
-    setup_gpu_lidar_assets, BuildLocalParams, BuildLocalParamsBuffer, DroneColorsBuffer,
-    DroneOrientationsBuffer, DronePositionsBuffer, GroundTruthBuffer, LidarParams,
-    LidarParamsBuffer, RayDirsBuffer, MAX_DRONES_GPU, MAX_LOCAL_INSTANCES, MAX_STEPS_PER_RAY,
+    setup_gpu_lidar_assets, BuildLocalParams, LidarParams, MAX_DRONES_GPU, MAX_LOCAL_INSTANCES,
+    MAX_STEPS_PER_RAY,
 };
 
 use super::constants::RAYS_PER_SCAN;
@@ -221,23 +222,32 @@ fn upload_build_params_and_colors(
     }
 }
 
+/// Marker on the Readback observer entity over the global occupancy
+/// SSBO. `apply_map_swap` despawns this entity (its handle would point
+/// at the stale pre-swap buffer); the system below respawns it once a
+/// fresh `GlobalOccupancyBuffer` is allocated for the new map.
+#[derive(Component)]
+pub struct GlobalOccupancyReadbackTag;
+
 /// One Readback over the global occupancy SSBO, counting Free/Occupied
 /// 2-bit slots into `GpuGlobalStats`. The panel reads the resource;
 /// this is the last CPU consumer of global voxel state.
 fn spawn_global_stats_readback(
     mut commands: Commands,
     occupancy: Option<Res<GlobalOccupancyBuffer>>,
-    mut spawned: Local<bool>,
+    existing: Query<(), With<GlobalOccupancyReadbackTag>>,
 ) {
-    if *spawned {
+    if !existing.is_empty() {
         return;
     }
     let Some(occupancy) = occupancy else {
         return;
     };
-    *spawned = true;
     commands
-        .spawn(Readback::buffer(occupancy.0.clone()))
+        .spawn((
+            Readback::buffer(occupancy.0.clone()),
+            GlobalOccupancyReadbackTag,
+        ))
         .observe(
             |event: On<ReadbackComplete>,
              mut stats: ResMut<GpuGlobalStats>,

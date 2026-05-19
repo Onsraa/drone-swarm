@@ -60,11 +60,16 @@ pub fn prepare_merge_global_bind_group(
     render_device: Res<RenderDevice>,
     pipeline: Res<MergeGlobalPipeline>,
     pipeline_cache: Res<PipelineCache>,
-    occupancy: Res<LocalOccupancyBuffer>,
-    params: Res<BuildLocalParamsBuffer>,
-    global_occupancy: Res<GlobalOccupancyBuffer>,
+    occupancy: Option<Res<LocalOccupancyBuffer>>,
+    params: Option<Res<BuildLocalParamsBuffer>>,
+    global_occupancy: Option<Res<GlobalOccupancyBuffer>>,
     buffers: Res<RenderAssets<GpuShaderStorageBuffer>>,
 ) {
+    let (Some(occupancy), Some(params), Some(global_occupancy)) =
+        (occupancy, params, global_occupancy)
+    else {
+        return;
+    };
     let Some(occupancy_buf) = buffers.get(&occupancy.0) else { return; };
     let Some(params_buf) = buffers.get(&params.0) else { return; };
     let Some(global_buf) = buffers.get(&global_occupancy.0) else { return; };
