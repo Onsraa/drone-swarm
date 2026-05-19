@@ -43,6 +43,7 @@ impl VoxelMap {
         Some(x + y * self.dims.x + z * self.dims.x * self.dims.y)
     }
 
+    #[allow(dead_code)]
     pub fn get(&self, p: IVec3) -> CellState {
         self.idx(p)
             .map(|i| self.cells[i as usize])
