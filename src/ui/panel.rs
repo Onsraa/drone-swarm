@@ -5,6 +5,7 @@ use bevy_egui::{egui, EguiContexts};
 use crate::camera::CameraMode;
 use crate::comms::{CommsSettings, CommsState, MAX_COMMS_RANGE_M, MIN_COMMS_RANGE_M};
 use crate::drone::{Drone, DroneColor, DroneId, DroneSpawnConfig, MAX_DRONE_COUNT, MIN_DRONE_COUNT};
+use crate::exploration::Role;
 use crate::groups::DroneGroupPresets;
 use crate::lidar::{gpu::GpuGlobalStats, LidarSettings};
 use crate::maps::{AvailableMaps, MapSwapRequested};
@@ -27,6 +28,7 @@ pub fn draw_ui(
     comms_state: Res<CommsState>,
     camera_mode: Res<CameraMode>,
     drones_q: Query<(&DroneId, &DroneColor), With<Drone>>,
+    drones_role_q: Query<&Role, With<Drone>>,
     gpu_stats: Res<GpuGlobalStats>,
     world: Res<WorldConfig>,
     diagnostics: Res<DiagnosticsStore>,
@@ -74,6 +76,9 @@ pub fn draw_ui(
 
             draw_drone_visibility(ui, &mut state, &drones_q);
             draw_group_presets(ui, &mut state, &mut presets, &mut preset_name_buf);
+            ui.separator();
+
+            draw_roles(ui, &drones_role_q);
             ui.separator();
 
             ui.label("Central map (GPU readback):");
@@ -282,4 +287,25 @@ fn draw_drone_visibility(
                 });
             }
         });
+}
+
+fn draw_roles(
+    ui: &mut egui::Ui,
+    drones_q: &Query<&Role, With<Drone>>,
+) {
+    let mut scouts = 0u32;
+    let mut mappers = 0u32;
+    let mut anchors = 0u32;
+    for role in drones_q.iter() {
+        match role {
+            Role::Scout => scouts += 1,
+            Role::Mapper => mappers += 1,
+            Role::Anchor => anchors += 1,
+        }
+    }
+    let total = scouts + mappers + anchors;
+    ui.label(format!("Roles ({} total)", total));
+    ui.label(format!("  Scouts:  {}", scouts));
+    ui.label(format!("  Mappers: {}", mappers));
+    ui.label(format!("  Anchors: {}", anchors));
 }
