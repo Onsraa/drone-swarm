@@ -69,6 +69,9 @@ pub struct LidarHitsBuffer(pub Handle<ShaderStorageBuffer>);
 pub struct LocalOccupancyBuffer(pub Handle<ShaderStorageBuffer>);
 
 #[derive(Resource, ExtractResource, Clone)]
+pub struct GlobalOccupancyBuffer(pub Handle<ShaderStorageBuffer>);
+
+#[derive(Resource, ExtractResource, Clone)]
 pub struct BuildLocalParamsBuffer(pub Handle<ShaderStorageBuffer>);
 
 #[derive(Resource, ExtractResource, Clone)]
@@ -144,6 +147,11 @@ pub fn setup_gpu_lidar_assets(
     occupancy_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
     let occupancy_handle = buffers.add(occupancy_buf);
 
+    let mut global_occupancy_buf = ShaderStorageBuffer::from(vec![0u32; words_per_drone]);
+    global_occupancy_buf.buffer_description.usage |=
+        BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let global_occupancy_handle = buffers.add(global_occupancy_buf);
+
     let build_params = BuildLocalParams {
         dims: UVec4::new(ground.dims.x, ground.dims.y, ground.dims.z, 0),
         drone_count: 0,
@@ -189,6 +197,7 @@ pub fn setup_gpu_lidar_assets(
     commands.insert_resource(RayDirsBuffer(dirs_handle));
     commands.insert_resource(LidarHitsBuffer(hits_handle));
     commands.insert_resource(LocalOccupancyBuffer(occupancy_handle));
+    commands.insert_resource(GlobalOccupancyBuffer(global_occupancy_handle));
     commands.insert_resource(BuildLocalParamsBuffer(build_params_handle));
     commands.insert_resource(DroneColorsBuffer(drone_colors_handle));
     commands.insert_resource(LocalInstanceCountBuffer(count_handle));

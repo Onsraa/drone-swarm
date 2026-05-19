@@ -1,5 +1,6 @@
 mod build_pass;
 mod dispatch;
+mod merge_pass;
 mod pipeline;
 mod resources;
 
@@ -21,12 +22,15 @@ use build_pass::{
     add_build_local_render_graph_node, init_build_local_pipeline, prepare_build_local_bind_group,
 };
 use dispatch::{add_compute_render_graph_node, prepare_lidar_bind_group};
+use merge_pass::{
+    add_merge_global_render_graph_node, init_merge_global_pipeline, prepare_merge_global_bind_group,
+};
 use pipeline::init_compute_lidar_pipeline;
 use resources::{
     setup_gpu_lidar_assets, BuildLocalParams, BuildLocalParamsBuffer, DroneColorsBuffer,
-    DroneOrientationsBuffer, DronePositionsBuffer, GroundTruthBuffer, LidarHitsBuffer, LidarParams,
-    LidarParamsBuffer, LocalOccupancyBuffer, PendingLidarHits, RayDirsBuffer, MAX_DRONES_GPU,
-    MAX_LOCAL_INSTANCES, MAX_STEPS_PER_RAY,
+    DroneOrientationsBuffer, DronePositionsBuffer, GlobalOccupancyBuffer, GroundTruthBuffer,
+    LidarHitsBuffer, LidarParams, LidarParamsBuffer, LocalOccupancyBuffer, PendingLidarHits,
+    RayDirsBuffer, MAX_DRONES_GPU, MAX_LOCAL_INSTANCES, MAX_STEPS_PER_RAY,
 };
 
 use super::constants::RAYS_PER_SCAN;
@@ -48,6 +52,7 @@ impl Plugin for GpuLidarPlugin {
             .add_plugins(ExtractResourcePlugin::<RayDirsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LidarHitsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LocalOccupancyBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<GlobalOccupancyBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<BuildLocalParamsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<DroneColorsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LocalInstanceCountBuffer>::default())
@@ -77,9 +82,14 @@ impl Plugin for GpuLidarPlugin {
                     init_compute_lidar_pipeline,
                     add_compute_render_graph_node,
                     init_build_local_pipeline,
-                    // Must run after the lidar node exists so we can wire
-                    // the `lidar -> build_local` edge.
-                    add_build_local_render_graph_node.after(add_compute_render_graph_node),
+                    init_merge_global_pipeline,
+                    // Edges: lidar -> merge_global -> build_local. All three
+                    // graph-node adds must run after their predecessor adds
+                    // so the node-edge wiring sees existing labels.
+                    add_merge_global_render_graph_node
+                        .after(add_compute_render_graph_node),
+                    add_build_local_render_graph_node
+                        .after(add_compute_render_graph_node),
                 ),
             )
             .add_systems(
@@ -87,7 +97,11 @@ impl Plugin for GpuLidarPlugin {
                 // `set_data` each frame re-prepares the storage buffers as
                 // brand-new GPU Buffer handles, so the bind group must
                 // rebuild every frame to point at the live ones.
-                (prepare_lidar_bind_group, prepare_build_local_bind_group)
+                (
+                    prepare_lidar_bind_group,
+                    prepare_merge_global_bind_group,
+                    prepare_build_local_bind_group,
+                )
                     .in_set(RenderSystems::PrepareBindGroups),
             );
     }
