@@ -17,6 +17,11 @@ pub const MAX_DRONES_GPU: u32 = 64;
 /// is hundreds of thousands; this is generous headroom.
 pub const MAX_LOCAL_INSTANCES: u32 = 1_000_000;
 
+/// Stage 9Eb output capacity. The merged central map has at most one
+/// instance per cell (`cells_per_drone` <= 98K for the default world),
+/// so 100K slots is plenty. 3.2 MB at 32 bytes each.
+pub const MAX_GLOBAL_INSTANCES: u32 = 100_000;
+
 /// Per-drone local-map occupancy is packed as 2 bits per cell into a
 /// `u32` storage buffer: bit 0 = Free flag, bit 1 = Occupied flag. Both
 /// flags are sticky under `atomicOr`. `Unknown` is the all-zero default.
@@ -82,6 +87,12 @@ pub struct LocalInstanceCountBuffer(pub Handle<ShaderStorageBuffer>);
 
 #[derive(Resource, ExtractResource, Clone)]
 pub struct LocalInstanceVecBuffer(pub Handle<ShaderStorageBuffer>);
+
+#[derive(Resource, ExtractResource, Clone)]
+pub struct GlobalInstanceCountBuffer(pub Handle<ShaderStorageBuffer>);
+
+#[derive(Resource, ExtractResource, Clone)]
+pub struct GlobalInstanceVecBuffer(pub Handle<ShaderStorageBuffer>);
 
 /// Stash for the latest GPU hits buffer. The Readback observer writes
 /// here from the main world; `apply_lidar_hits` drains and feeds each
@@ -180,6 +191,17 @@ pub fn setup_gpu_lidar_assets(
         BufferUsages::COPY_SRC | BufferUsages::COPY_DST | BufferUsages::VERTEX;
     let instance_vec_handle = buffers.add(instance_vec_buf);
 
+    let mut global_count_buf = ShaderStorageBuffer::from(vec![0u32; 1]);
+    global_count_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let global_count_handle = buffers.add(global_count_buf);
+
+    let global_instance_vec_len = (MAX_GLOBAL_INSTANCES as usize) * 2;
+    let mut global_instance_vec_buf =
+        ShaderStorageBuffer::from(vec![Vec4::ZERO; global_instance_vec_len]);
+    global_instance_vec_buf.buffer_description.usage |=
+        BufferUsages::COPY_SRC | BufferUsages::COPY_DST | BufferUsages::VERTEX;
+    let global_instance_vec_handle = buffers.add(global_instance_vec_buf);
+
     info!(
         "GPU lidar buffers allocated: {} drone slots, {} rays/scan, {} steps/ray, {} hit u32s, {} occupancy u32s ({} words/drone)",
         MAX_DRONES_GPU,
@@ -202,4 +224,6 @@ pub fn setup_gpu_lidar_assets(
     commands.insert_resource(DroneColorsBuffer(drone_colors_handle));
     commands.insert_resource(LocalInstanceCountBuffer(count_handle));
     commands.insert_resource(LocalInstanceVecBuffer(instance_vec_handle));
+    commands.insert_resource(GlobalInstanceCountBuffer(global_count_handle));
+    commands.insert_resource(GlobalInstanceVecBuffer(global_instance_vec_handle));
 }

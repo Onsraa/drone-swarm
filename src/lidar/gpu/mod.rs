@@ -1,10 +1,14 @@
+mod build_global_pass;
 mod build_pass;
 mod dispatch;
 mod merge_pass;
 mod pipeline;
 mod resources;
 
-pub use resources::{LocalInstanceCountBuffer, LocalInstanceVecBuffer};
+pub use resources::{
+    GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, LocalInstanceCountBuffer,
+    LocalInstanceVecBuffer,
+};
 
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResourcePlugin;
@@ -18,6 +22,10 @@ use crate::world::WorldConfig;
 
 use super::components::LastScanRays;
 
+use build_global_pass::{
+    add_build_global_render_graph_node, init_build_global_pipeline,
+    prepare_build_global_bind_group,
+};
 use build_pass::{
     add_build_local_render_graph_node, init_build_local_pipeline, prepare_build_local_bind_group,
 };
@@ -57,6 +65,8 @@ impl Plugin for GpuLidarPlugin {
             .add_plugins(ExtractResourcePlugin::<DroneColorsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LocalInstanceCountBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LocalInstanceVecBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<GlobalInstanceCountBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<GlobalInstanceVecBuffer>::default())
             .add_systems(
                 Update,
                 (
@@ -83,13 +93,17 @@ impl Plugin for GpuLidarPlugin {
                     add_compute_render_graph_node,
                     init_build_local_pipeline,
                     init_merge_global_pipeline,
-                    // Edges: lidar -> merge_global -> build_local. All three
-                    // graph-node adds must run after their predecessor adds
-                    // so the node-edge wiring sees existing labels.
+                    init_build_global_pipeline,
+                    // Edges: lidar -> {merge_global, build_local}.
+                    //        merge_global -> build_global.
+                    // The add_* systems must run after the systems that
+                    // installed their referenced labels.
                     add_merge_global_render_graph_node
                         .after(add_compute_render_graph_node),
                     add_build_local_render_graph_node
                         .after(add_compute_render_graph_node),
+                    add_build_global_render_graph_node
+                        .after(add_merge_global_render_graph_node),
                 ),
             )
             .add_systems(
@@ -101,6 +115,7 @@ impl Plugin for GpuLidarPlugin {
                     prepare_lidar_bind_group,
                     prepare_merge_global_bind_group,
                     prepare_build_local_bind_group,
+                    prepare_build_global_bind_group,
                 )
                     .in_set(RenderSystems::PrepareBindGroups),
             );

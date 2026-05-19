@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::render::{GlobalMapVoxel, GpuLocalMapVoxel, GroundTruthVoxel};
+use crate::render::{GpuGlobalMapVoxel, GpuLocalMapVoxel, GroundTruthVoxel};
 
 use super::resources::UiState;
 
@@ -15,7 +15,7 @@ pub fn apply_visibility(
         (
             With<GroundTruthVoxel>,
             Without<GpuLocalMapVoxel>,
-            Without<GlobalMapVoxel>,
+            Without<GpuGlobalMapVoxel>,
         ),
     >,
     mut local_map_q: Query<
@@ -23,13 +23,13 @@ pub fn apply_visibility(
         (
             With<GpuLocalMapVoxel>,
             Without<GroundTruthVoxel>,
-            Without<GlobalMapVoxel>,
+            Without<GpuGlobalMapVoxel>,
         ),
     >,
     mut global_map_q: Query<
         &mut Visibility,
         (
-            With<GlobalMapVoxel>,
+            With<GpuGlobalMapVoxel>,
             Without<GroundTruthVoxel>,
             Without<GpuLocalMapVoxel>,
         ),
