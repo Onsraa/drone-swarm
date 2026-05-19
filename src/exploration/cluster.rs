@@ -1,7 +1,7 @@
 use super::constants::{MAX_FRONTIER_CANDIDATES, MIN_CLUSTER_SIZE};
 use super::resources::FrontierCluster;
+use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
-use std::collections::HashSet;
 
 /// 6-neighbourhood flood-fill on a candidate cell set. Clusters smaller
 /// than `MIN_CLUSTER_SIZE` are discarded. Each cluster receives a unique

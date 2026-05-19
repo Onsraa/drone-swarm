@@ -357,17 +357,18 @@ fn spawn_global_stats_readback(
              mut stats: ResMut<GpuGlobalStats>,
              mut mirror: ResMut<GpuGlobalOccupancyMirror>| {
                 let data: Vec<u32> = event.to_shader_type();
+                // Bitwise + popcount decode: each u32 holds 16 cells,
+                // 2 bits each, even bits = Free flag, odd = Occupied.
+                // Occupied wins when both set (state == 0b11).
                 let mut free = 0usize;
                 let mut occupied = 0usize;
                 for &word in &data {
-                    for slot in 0..16u32 {
-                        let state = (word >> (slot * 2)) & 0b11;
-                        match state {
-                            1 => free += 1,
-                            2 | 3 => occupied += 1,
-                            _ => {}
-                        }
-                    }
+                    let occ_bits = word & 0xAAAAAAAA;
+                    let free_bits = word & 0x55555555;
+                    // free wins only when occupied bit clear (occ_bits >> 1 == 0 at that pair).
+                    let free_only = free_bits & !(occ_bits >> 1);
+                    occupied += occ_bits.count_ones() as usize;
+                    free += free_only.count_ones() as usize;
                 }
                 stats.free = free;
                 stats.occupied = occupied;

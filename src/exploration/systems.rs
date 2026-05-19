@@ -1,6 +1,6 @@
 // src/exploration/systems.rs
+use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
-use std::collections::HashSet;
 
 use crate::comms::CommsState;
 use crate::drone::{Drone, DroneId};
@@ -243,9 +243,16 @@ pub struct ClusterScanState {
     pub candidates: HashSet<UVec3>,
     pub word_cursor: usize,
     pub active: bool,
+    pub cooldown_secs: f32,
 }
 
+/// Minimum gap between cluster-scan finalisations. Caps the `build_clusters`
+/// spike rate to ~2/s regardless of frame rate. At 240 FPS the 614 K-word
+/// scan would otherwise complete every ~80 ms = 12 spikes/s.
+const CLUSTER_SCAN_COOLDOWN_SECS: f32 = 0.5;
+
 pub fn compute_frontier_clusters(
+    time: Res<Time>,
     mirror: Res<GpuGlobalOccupancyMirror>,
     world: Res<crate::world::WorldConfig>,
     mut state: Local<ClusterScanState>,
@@ -255,6 +262,10 @@ pub fn compute_frontier_clusters(
         return;
     }
     if !state.active {
+        state.cooldown_secs -= time.delta_secs();
+        if state.cooldown_secs > 0.0 {
+            return;
+        }
         state.snapshot.clone_from(&mirror.data);
         state.dims = world.size;
         state.candidates.clear();
@@ -328,9 +339,10 @@ pub fn compute_frontier_clusters(
         return;
     }
 
-    // Scan complete — publish the new cluster list, restart on next tick.
+    // Scan complete — publish the new cluster list, restart after cooldown.
     clusters.entries = build_clusters(&state.candidates, &mut clusters.next_id);
     state.active = false;
+    state.cooldown_secs = CLUSTER_SCAN_COOLDOWN_SECS;
 }
 
 pub fn replan_paths(
