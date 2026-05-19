@@ -22,6 +22,15 @@ struct LidarParams {
     _pad: u32,
 }
 
+struct DroneScanParams {
+    ray_offset: u32,
+    ray_count: u32,
+    max_steps: u32,
+    scan_interval: u32,
+    // NOTE: per-drone scan_interval gating is deferred; dispatch-level
+    // gating via LidarFrameCounter in ComputeLidarNode::run is used instead.
+}
+
 @group(0) @binding(0) var<storage, read> ground_bitset: array<u32>;
 @group(0) @binding(1) var<storage, read> params: LidarParams;
 @group(0) @binding(2) var<storage, read> drone_positions: array<vec4<f32>>;
@@ -31,6 +40,7 @@ struct LidarParams {
 @group(0) @binding(6) var<storage, read> drone_colors: array<vec4<f32>>;
 @group(0) @binding(7) var<storage, read_write> point_count: atomic<u32>;
 @group(0) @binding(8) var<storage, read_write> point_buffer: array<vec4<f32>>;
+@group(0) @binding(9) var<storage, read> drone_scan: array<DroneScanParams>;
 
 fn cell_flat_idx(cell: vec3<i32>) -> u32 {
     return u32(cell.x)
@@ -113,13 +123,18 @@ fn emit_point(drone_idx: u32, hit_world: vec3<f32>) {
 @compute @workgroup_size(8, 8, 1)
 fn lidar(@builtin(global_invocation_id) gid: vec3<u32>) {
     let drone_idx = gid.x;
-    let ray_idx = gid.y;
-    if (drone_idx >= params.drone_count || ray_idx >= params.rays_per_scan) {
+    if (drone_idx >= params.drone_count) {
         return;
     }
+    let scan = drone_scan[drone_idx];
+    let ray_local_idx = gid.y;
+    if (ray_local_idx >= scan.ray_count) {
+        return;
+    }
+    let ray_buf_idx = scan.ray_offset + ray_local_idx;
+    let local_dir = ray_dirs[ray_buf_idx].xyz;
 
     let origin = drone_positions[drone_idx].xyz;
-    let local_dir = ray_dirs[ray_idx].xyz;
     let world_dir = normalize(quat_rotate(drone_orientations[drone_idx], local_dir));
 
     var cell = vec3<i32>(floor(origin));
@@ -142,7 +157,7 @@ fn lidar(@builtin(global_invocation_id) gid: vec3<u32>) {
     var t_entry: f32 = 0.0;
     var step: u32 = 0u;
     loop {
-        if (step >= params.max_steps) { break; }
+        if (step >= scan.max_steps) { break; }
 
         let in_bounds = cell_in_bounds(cell);
         let occupied = in_bounds && ground_is_occupied(cell);

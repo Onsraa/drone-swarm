@@ -5,6 +5,7 @@ use bevy::render::render_resource::{
     ComputePipelineDescriptor, PipelineCache, ShaderStages,
 };
 
+use super::per_drone_scan::DroneScanParams;
 use super::resources::LidarParams;
 
 const SHADER_ASSET_PATH: &str = "shaders/lidar_compute.wgsl";
@@ -43,6 +44,8 @@ pub fn init_compute_lidar_pipeline(
                 storage_buffer::<Vec<u32>>(false),
                 // 8: lidar point buffer (Vec<Vec4> pairs: pos_scale + color)
                 storage_buffer::<Vec<Vec4>>(false),
+                // 9: per-drone scan params (read)
+                storage_buffer_read_only::<Vec<DroneScanParams>>(false),
             ),
         ),
     );
