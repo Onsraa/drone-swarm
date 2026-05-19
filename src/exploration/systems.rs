@@ -1,18 +1,22 @@
 // src/exploration/systems.rs
 use bevy::prelude::*;
+use std::collections::HashSet;
 
 use crate::comms::CommsState;
 use crate::drone::{Drone, DroneId, CRUISE_SPEED_MPS};
 use crate::lidar::gpu::GpuGlobalOccupancyMirror;
 use crate::physics::{DesiredVelocity, LinearVelocity};
 
+use super::cluster::build_clusters;
 use super::components::{FrontierTarget, MovementHealth, Path};
 use super::constants::{
-    AVOID_K_DEFAULT, AVOID_RADIUS_M, FRONTIER_REACHED_DIST, PATH_FOLLOW_LERP_RATE,
-    SCORE_UPGRADE_RATIO, STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS, STUCK_VEL_MPS,
+    AVOID_K_DEFAULT, AVOID_RADIUS_M, FRONTIER_REACHED_DIST, FRONTIER_REFRESH_SECS,
+    PATH_FOLLOW_LERP_RATE, PLANNER_DOWNSAMPLE, REPLAN_MIN_INTERVAL_SECS, SCORE_UPGRADE_RATIO,
+    STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS, STUCK_VEL_MPS,
 };
+use super::planner::plan;
+use super::resources::{FrontierClusters, PlannerGrid};
 use super::steering::{pure_pursuit, reactive_force};
-use super::resources::FrontierClusters;
 use super::scoring::{crowding_for, score, ScoringWeights};
 use rand::RngExt;
 
@@ -103,11 +107,140 @@ pub fn assign_targets(
     }
 }
 
-pub fn compute_frontier_clusters() {
-    // Wired in Task 10.
+pub fn rebuild_planner_grid(
+    time: Res<Time>,
+    mut timer: Local<f32>,
+    mirror: Res<GpuGlobalOccupancyMirror>,
+    world: Res<crate::world::WorldConfig>,
+    mut grid: ResMut<PlannerGrid>,
+) {
+    *timer += time.delta_secs();
+    if *timer < FRONTIER_REFRESH_SECS {
+        return;
+    }
+    *timer = 0.0;
+    if mirror.data.is_empty() {
+        return;
+    }
+    *grid = PlannerGrid::downsample_from_bitset(
+        world.size,
+        world.voxel_size,
+        &mirror.data,
+        PLANNER_DOWNSAMPLE,
+    );
 }
-pub fn rebuild_planner_grid() {}
-pub fn replan_paths() {}
+
+pub fn compute_frontier_clusters(
+    time: Res<Time>,
+    mut timer: Local<f32>,
+    mirror: Res<GpuGlobalOccupancyMirror>,
+    world: Res<crate::world::WorldConfig>,
+    mut clusters: ResMut<FrontierClusters>,
+) {
+    *timer += time.delta_secs();
+    if *timer < FRONTIER_REFRESH_SECS {
+        return;
+    }
+    *timer = 0.0;
+    if mirror.data.is_empty() {
+        return;
+    }
+    let dims = world.size;
+    let total = dims.x * dims.y * dims.z;
+    let data = &mirror.data;
+    let read = |cell: u32| -> u32 {
+        let w = (cell / 16) as usize;
+        if w >= data.len() {
+            return 0;
+        }
+        let b = (cell % 16) * 2;
+        (data[w] >> b) & 0b11
+    };
+    let mut candidates: HashSet<UVec3> = HashSet::new();
+    let plane = dims.x * dims.y;
+    for cell in 0..total {
+        if read(cell) != 0b01 {
+            continue;
+        }
+        // Free cell — push Unknown 6-neighbours.
+        let z = cell / plane;
+        let rem = cell % plane;
+        let y = rem / dims.x;
+        let x = rem % dims.x;
+        let ix = x as i32;
+        let iy = y as i32;
+        let iz = z as i32;
+        for d in [
+            IVec3::new(-1, 0, 0),
+            IVec3::new(1, 0, 0),
+            IVec3::new(0, -1, 0),
+            IVec3::new(0, 1, 0),
+            IVec3::new(0, 0, -1),
+            IVec3::new(0, 0, 1),
+        ] {
+            let nx = ix + d.x;
+            let ny = iy + d.y;
+            let nz = iz + d.z;
+            if nx < 0 || ny < 0 || nz < 0 {
+                continue;
+            }
+            if nx as u32 >= dims.x || ny as u32 >= dims.y || nz as u32 >= dims.z {
+                continue;
+            }
+            let nflat = nx as u32 + ny as u32 * dims.x + nz as u32 * plane;
+            if read(nflat) == 0 {
+                candidates.insert(UVec3::new(nx as u32, ny as u32, nz as u32));
+            }
+        }
+    }
+    clusters.entries = build_clusters(&candidates, &mut clusters.next_id);
+}
+
+#[derive(Component, Default, Debug)]
+pub struct ReplanTimer(pub f32);
+
+pub fn replan_paths(
+    time: Res<Time>,
+    grid: Res<PlannerGrid>,
+    mut q: Query<
+        (&Transform, &FrontierTarget, &mut Path, &mut ReplanTimer),
+        With<Drone>,
+    >,
+) {
+    if grid.dims == UVec3::ZERO {
+        return;
+    }
+    let dt = time.delta_secs();
+    for (transform, target, mut path, mut rt) in &mut q {
+        rt.0 += dt;
+        let Some(target_pos) = target.pos else {
+            path.waypoints.clear();
+            path.cursor = 0;
+            continue;
+        };
+        let need_replan =
+            path.waypoints.is_empty() || rt.0 >= REPLAN_MIN_INTERVAL_SECS;
+        if !need_replan {
+            continue;
+        }
+        rt.0 = 0.0;
+
+        let drone_pos = transform.translation;
+        let cell_size = grid.voxel_size * grid.downsample as f32;
+        let start = (drone_pos / cell_size).floor().as_uvec3();
+        let goal = (target_pos / cell_size).floor().as_uvec3();
+        match plan(&grid, start, goal) {
+            Some(cells) => {
+                path.waypoints = cells.iter().map(|c| grid.world_pos_of(*c)).collect();
+                path.cursor = 0;
+            }
+            None => {
+                path.waypoints.clear();
+                path.cursor = 0;
+            }
+        }
+    }
+}
 pub fn update_movement_health(
     time: Res<Time>,
     mut q: Query<(&LinearVelocity, &mut MovementHealth), With<Drone>>,
