@@ -3,6 +3,8 @@ mod dispatch;
 mod pipeline;
 mod resources;
 
+pub use resources::{LocalInstanceCountBuffer, LocalInstanceVecBuffer};
+
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResourcePlugin;
 use bevy::render::gpu_readback::{Readback, ReadbackComplete};
@@ -23,8 +25,8 @@ use pipeline::init_compute_lidar_pipeline;
 use resources::{
     setup_gpu_lidar_assets, BuildLocalParams, BuildLocalParamsBuffer, DroneColorsBuffer,
     DroneOrientationsBuffer, DronePositionsBuffer, GroundTruthBuffer, LidarHitsBuffer, LidarParams,
-    LidarParamsBuffer, LocalInstanceCountBuffer, LocalInstanceVecBuffer, LocalOccupancyBuffer,
-    PendingLidarHits, RayDirsBuffer, MAX_DRONES_GPU, MAX_LOCAL_INSTANCES, MAX_STEPS_PER_RAY,
+    LidarParamsBuffer, LocalOccupancyBuffer, PendingLidarHits, RayDirsBuffer, MAX_DRONES_GPU,
+    MAX_LOCAL_INSTANCES, MAX_STEPS_PER_RAY,
 };
 
 use super::constants::RAYS_PER_SCAN;

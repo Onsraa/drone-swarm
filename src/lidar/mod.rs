@@ -1,6 +1,6 @@
 mod components;
 mod constants;
-mod gpu;
+pub mod gpu;
 mod sampling;
 
 use bevy::prelude::*;

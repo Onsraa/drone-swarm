@@ -11,11 +11,13 @@ use bevy::render::render_resource::SpecializedMeshPipelines;
 use bevy::render::sync_world::{RenderEntity, SyncToRenderWorld};
 use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems};
 
+pub use buffer::InstanceBuffer;
 pub use components::{InstanceData, InstancedVoxelLayer};
+pub use draw::DrawVoxelInstanced;
+pub use pipeline::VoxelInstancedPipeline;
 
 use buffer::prepare_instance_buffers;
-use draw::DrawVoxelInstanced;
-use pipeline::{init_voxel_instanced_pipeline, VoxelInstancedPipeline};
+use pipeline::init_voxel_instanced_pipeline;
 use queue::queue_voxel_instanced;
 
 pub struct InstancedVoxelPlugin;
