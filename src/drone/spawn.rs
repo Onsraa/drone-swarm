@@ -1,18 +1,16 @@
 use std::f32::consts::TAU;
 
-use bevy::color::Hsla;
 use bevy::gltf::GltfAssetLabel;
 use bevy::prelude::*;
 use rand::{Rng, RngExt};
 
-use crate::exploration::{FrontierTarget, MovementHealth, Path, ReplanTimer};
+use crate::exploration::{FrontierTarget, MovementHealth, Path, ReplanTimer, Role, RoleParams};
 use crate::physics::{DesiredAttitude, DesiredVelocity, LinearVelocity, ThrustState};
 use crate::world::WorldConfig;
 
 use super::components::{Drone, DroneColor, DroneId, PendingCenter, WanderTarget, WanderTimer};
 use super::constants::{
-    DRONE_COLOR_ALPHA, DRONE_COLOR_LIGHTNESS, DRONE_COLOR_SATURATION, DRONE_GLB_PATH,
-    DRONE_HUE_STEP_DEGREES, DRONE_SCALE, DRONE_SPAWN_RADIUS_METERS, MODEL_YAW_OFFSET_RADIANS,
+    DRONE_GLB_PATH, DRONE_SCALE, DRONE_SPAWN_RADIUS_METERS, MODEL_YAW_OFFSET_RADIANS,
     RANDOM_DIR_MIN_LENGTH, WANDER_CHANGE_INTERVAL_SECS,
 };
 use super::resources::DroneSpawnConfig;
@@ -39,8 +37,10 @@ pub fn respawn_drones_if_needed(
     let target = spawn_config.target_count;
     for id in 0..target {
         let spawn_pos = ring_position(world_center, id, target);
-        let color = drone_color(id);
-        spawn_one_drone(&mut commands, &asset_server, id, spawn_pos, color);
+        let role = role_for_index(id, target);
+        let tint = RoleParams::for_role(role).tint;
+        let color = Color::linear_rgba(tint[0], tint[1], tint[2], tint[3]);
+        spawn_one_drone(&mut commands, &asset_server, id, spawn_pos, color, role);
     }
     info!(
         "respawned drones: {} -> {}",
@@ -54,12 +54,14 @@ fn spawn_one_drone(
     id: u32,
     spawn_pos: Vec3,
     color: Color,
+    role: Role,
 ) {
     commands
         .spawn((
             Drone,
             DroneId(id),
             DroneColor(color),
+            role,
             LinearVelocity::default(),
             DesiredVelocity::default(),
             ThrustState::default(),
@@ -69,6 +71,8 @@ fn spawn_one_drone(
                 TimerMode::Repeating,
             )),
             WanderTarget::default(),
+        ))
+        .insert((
             FrontierTarget::default(),
             MovementHealth::default(),
             Path::default(),
@@ -99,17 +103,25 @@ fn ring_position(center: Vec3, id: u32, count: u32) -> Vec3 {
     )
 }
 
-/// Golden-ratio hue spacing keeps adjacent ids perceptually distinct even
-/// for 50+ drones.
-fn drone_color(id: u32) -> Color {
-    let hue = (id as f32 * DRONE_HUE_STEP_DEGREES).rem_euclid(360.0);
-    Hsla::new(
-        hue,
-        DRONE_COLOR_SATURATION,
-        DRONE_COLOR_LIGHTNESS,
-        DRONE_COLOR_ALPHA,
-    )
-    .into()
+/// Assign a default role based on position in the fleet.
+/// Distribution: 60% Scout / 30% Mapper / 10% Anchor.
+/// Guarantee: at least 1 Mapper when N >= 4; below that pure Scout/Mapper split.
+fn role_for_index(id: u32, total: u32) -> Role {
+    // Number of each role (rounded down, scouts get the remainder)
+    let n_anchor = if total >= 10 { total / 10 } else { 0 };
+    let n_mapper = if total >= 4 {
+        (total * 3 / 10).max(1)
+    } else {
+        total / 3
+    };
+    // Anchors occupy the last slots, mappers the block before them, scouts the rest.
+    if id >= total - n_anchor {
+        Role::Anchor
+    } else if id >= total - n_anchor - n_mapper {
+        Role::Mapper
+    } else {
+        Role::Scout
+    }
 }
 
 pub fn random_unit_dir(rng: &mut impl Rng) -> Vec3 {
