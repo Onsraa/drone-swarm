@@ -1,3 +1,4 @@
+mod build_pass;
 mod dispatch;
 mod pipeline;
 mod resources;
@@ -8,18 +9,22 @@ use bevy::render::gpu_readback::{Readback, ReadbackComplete};
 use bevy::render::storage::ShaderStorageBuffer;
 use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 
-use crate::drone::{Drone, DroneId};
+use crate::drone::{Drone, DroneColor, DroneId};
 use crate::map::{unflatten, CellState, LocalMap};
 use crate::world::WorldConfig;
 
 use super::components::LastScanRays;
 
+use build_pass::{
+    add_build_local_render_graph_node, init_build_local_pipeline, prepare_build_local_bind_group,
+};
 use dispatch::{add_compute_render_graph_node, prepare_lidar_bind_group};
 use pipeline::init_compute_lidar_pipeline;
 use resources::{
-    setup_gpu_lidar_assets, DroneOrientationsBuffer, DronePositionsBuffer, GroundTruthBuffer,
-    LidarHitsBuffer, LidarParams, LidarParamsBuffer, LocalOccupancyBuffer, PendingLidarHits,
-    RayDirsBuffer, MAX_DRONES_GPU, MAX_STEPS_PER_RAY,
+    setup_gpu_lidar_assets, BuildLocalParams, BuildLocalParamsBuffer, DroneColorsBuffer,
+    DroneOrientationsBuffer, DronePositionsBuffer, GroundTruthBuffer, LidarHitsBuffer, LidarParams,
+    LidarParamsBuffer, LocalInstanceCountBuffer, LocalInstanceVecBuffer, LocalOccupancyBuffer,
+    PendingLidarHits, RayDirsBuffer, MAX_DRONES_GPU, MAX_LOCAL_INSTANCES, MAX_STEPS_PER_RAY,
 };
 
 use super::constants::RAYS_PER_SCAN;
@@ -41,6 +46,10 @@ impl Plugin for GpuLidarPlugin {
             .add_plugins(ExtractResourcePlugin::<RayDirsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LidarHitsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LocalOccupancyBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<BuildLocalParamsBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<DroneColorsBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<LocalInstanceCountBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<LocalInstanceVecBuffer>::default())
             .add_systems(
                 Update,
                 (
@@ -50,6 +59,8 @@ impl Plugin for GpuLidarPlugin {
                     spawn_lidar_readback.run_if(resource_exists::<LidarHitsBuffer>),
                     upload_drone_state
                         .run_if(resource_exists::<DronePositionsBuffer>),
+                    upload_build_params_and_colors
+                        .run_if(resource_exists::<BuildLocalParamsBuffer>),
                     apply_lidar_hits.after(upload_drone_state),
                 ),
             );
@@ -60,14 +71,22 @@ impl Plugin for GpuLidarPlugin {
         render_app
             .add_systems(
                 RenderStartup,
-                (init_compute_lidar_pipeline, add_compute_render_graph_node),
+                (
+                    init_compute_lidar_pipeline,
+                    add_compute_render_graph_node,
+                    init_build_local_pipeline,
+                    // Must run after the lidar node exists so we can wire
+                    // the `lidar -> build_local` edge.
+                    add_build_local_render_graph_node.after(add_compute_render_graph_node),
+                ),
             )
             .add_systems(
                 Render,
                 // `set_data` each frame re-prepares the storage buffers as
                 // brand-new GPU Buffer handles, so the bind group must
                 // rebuild every frame to point at the live ones.
-                prepare_lidar_bind_group.in_set(RenderSystems::PrepareBindGroups),
+                (prepare_lidar_bind_group, prepare_build_local_bind_group)
+                    .in_set(RenderSystems::PrepareBindGroups),
             );
     }
 }
@@ -132,6 +151,55 @@ fn upload_drone_state(
             rays_per_scan: RAYS_PER_SCAN as u32,
             drone_count: count,
             _pad: 0,
+        };
+        buf.set_data(params);
+    }
+}
+
+/// Sort drones by `DroneId`, pack their colors as linear `Vec4`s, and
+/// push them plus the up-to-date Stage 9B `BuildLocalParams` (drone count,
+/// voxel size, local-map scale factor) into their storage buffers each
+/// frame.
+fn upload_build_params_and_colors(
+    mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
+    colors_handle: Res<DroneColorsBuffer>,
+    params_handle: Res<BuildLocalParamsBuffer>,
+    config: Res<WorldConfig>,
+    drones: Query<(&DroneId, &DroneColor), With<Drone>>,
+) {
+    let mut sorted: Vec<(u32, Vec4)> = drones
+        .iter()
+        .map(|(id, color)| {
+            let linear = color.0.to_linear();
+            (
+                id.0,
+                Vec4::new(
+                    (linear.red * crate::render::constants::LOCAL_MAP_COLOR_FACTOR).min(1.0),
+                    (linear.green * crate::render::constants::LOCAL_MAP_COLOR_FACTOR).min(1.0),
+                    (linear.blue * crate::render::constants::LOCAL_MAP_COLOR_FACTOR).min(1.0),
+                    crate::render::constants::LOCAL_MAP_ALPHA,
+                ),
+            )
+        })
+        .collect();
+    sorted.sort_by_key(|(id, _)| *id);
+
+    let max = MAX_DRONES_GPU as usize;
+    let mut colors = vec![Vec4::ZERO; max];
+    let count = sorted.len().min(max) as u32;
+    for (i, (_, color)) in sorted.iter().take(max).enumerate() {
+        colors[i] = *color;
+    }
+    if let Some(buf) = buffers.get_mut(&colors_handle.0) {
+        buf.set_data(colors);
+    }
+    if let Some(buf) = buffers.get_mut(&params_handle.0) {
+        let params = BuildLocalParams {
+            dims: UVec4::new(config.size.x, config.size.y, config.size.z, 0),
+            drone_count: count,
+            voxel_size: config.voxel_size,
+            scale_factor: crate::render::constants::LOCAL_MAP_SCALE_FACTOR,
+            max_instances: MAX_LOCAL_INSTANCES,
         };
         buf.set_data(params);
     }

@@ -1,6 +1,6 @@
 mod assets;
 mod components;
-mod constants;
+pub mod constants;
 mod global_map;
 mod ground_truth;
 mod instancing;

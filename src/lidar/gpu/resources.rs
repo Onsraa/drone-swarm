@@ -11,6 +11,12 @@ use super::super::sampling::LidarRayDirs;
 pub const MAX_STEPS_PER_RAY: u32 = 96;
 pub const MAX_DRONES_GPU: u32 = 64;
 
+/// Stage 9B output buffer capacity: max number of Occupied-cell instances
+/// the build pass can emit across all drones in a single dispatch. 1M
+/// instances at 32 bytes each = 32 MB. Steady state in a 50-drone session
+/// is hundreds of thousands; this is generous headroom.
+pub const MAX_LOCAL_INSTANCES: u32 = 1_000_000;
+
 /// Per-drone local-map occupancy is packed as 2 bits per cell into a
 /// `u32` storage buffer: bit 0 = Free flag, bit 1 = Occupied flag. Both
 /// flags are sticky under `atomicOr`. `Unknown` is the all-zero default.
@@ -29,6 +35,16 @@ pub struct LidarParams {
     pub rays_per_scan: u32,
     pub drone_count: u32,
     pub _pad: u32,
+}
+
+/// Mirrors the WGSL `BuildParams` struct used by `build_local_instances`.
+#[derive(ShaderType, Clone, Copy, Debug)]
+pub struct BuildLocalParams {
+    pub dims: UVec4,
+    pub drone_count: u32,
+    pub voxel_size: f32,
+    pub scale_factor: f32,
+    pub max_instances: u32,
 }
 
 #[derive(Resource, ExtractResource, Clone)]
@@ -51,6 +67,18 @@ pub struct LidarHitsBuffer(pub Handle<ShaderStorageBuffer>);
 
 #[derive(Resource, ExtractResource, Clone)]
 pub struct LocalOccupancyBuffer(pub Handle<ShaderStorageBuffer>);
+
+#[derive(Resource, ExtractResource, Clone)]
+pub struct BuildLocalParamsBuffer(pub Handle<ShaderStorageBuffer>);
+
+#[derive(Resource, ExtractResource, Clone)]
+pub struct DroneColorsBuffer(pub Handle<ShaderStorageBuffer>);
+
+#[derive(Resource, ExtractResource, Clone)]
+pub struct LocalInstanceCountBuffer(pub Handle<ShaderStorageBuffer>);
+
+#[derive(Resource, ExtractResource, Clone)]
+pub struct LocalInstanceVecBuffer(pub Handle<ShaderStorageBuffer>);
 
 /// Stash for the latest GPU hits buffer. The Readback observer writes
 /// here from the main world; `apply_lidar_hits` drains and feeds each
@@ -116,6 +144,34 @@ pub fn setup_gpu_lidar_assets(
     occupancy_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
     let occupancy_handle = buffers.add(occupancy_buf);
 
+    let build_params = BuildLocalParams {
+        dims: UVec4::new(ground.dims.x, ground.dims.y, ground.dims.z, 0),
+        drone_count: 0,
+        voxel_size: 1.0,
+        scale_factor: 1.0,
+        max_instances: MAX_LOCAL_INSTANCES,
+    };
+    let mut build_params_buf = ShaderStorageBuffer::from(build_params);
+    build_params_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let build_params_handle = buffers.add(build_params_buf);
+
+    let drone_colors: Vec<Vec4> = vec![Vec4::ZERO; MAX_DRONES_GPU as usize];
+    let mut drone_colors_buf = ShaderStorageBuffer::from(drone_colors);
+    drone_colors_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let drone_colors_handle = buffers.add(drone_colors_buf);
+
+    let mut count_buf = ShaderStorageBuffer::from(vec![0u32; 1]);
+    count_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let count_handle = buffers.add(count_buf);
+
+    // Two vec4 per instance (pos_scale + color). Also flag for vertex use
+    // so Stage 9C's render pipeline can bind the same buffer.
+    let instance_vec_len = (MAX_LOCAL_INSTANCES as usize) * 2;
+    let mut instance_vec_buf = ShaderStorageBuffer::from(vec![Vec4::ZERO; instance_vec_len]);
+    instance_vec_buf.buffer_description.usage |=
+        BufferUsages::COPY_SRC | BufferUsages::COPY_DST | BufferUsages::VERTEX;
+    let instance_vec_handle = buffers.add(instance_vec_buf);
+
     info!(
         "GPU lidar buffers allocated: {} drone slots, {} rays/scan, {} steps/ray, {} hit u32s, {} occupancy u32s ({} words/drone)",
         MAX_DRONES_GPU,
@@ -133,4 +189,8 @@ pub fn setup_gpu_lidar_assets(
     commands.insert_resource(RayDirsBuffer(dirs_handle));
     commands.insert_resource(LidarHitsBuffer(hits_handle));
     commands.insert_resource(LocalOccupancyBuffer(occupancy_handle));
+    commands.insert_resource(BuildLocalParamsBuffer(build_params_handle));
+    commands.insert_resource(DroneColorsBuffer(drone_colors_handle));
+    commands.insert_resource(LocalInstanceCountBuffer(count_handle));
+    commands.insert_resource(LocalInstanceVecBuffer(instance_vec_handle));
 }
