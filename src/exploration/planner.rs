@@ -85,6 +85,136 @@ impl PlannerGrid {
     }
 }
 
+use super::constants::{PLANNER_DEEP_UNKNOWN_MULT, PLANNER_FREE_COST, PLANNER_UNKNOWN_COST_MULT};
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap};
+
+#[derive(Copy, Clone, PartialEq)]
+struct Node {
+    cell: UVec3,
+    f: f32,
+}
+impl Eq for Node {}
+impl Ord for Node {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // BinaryHeap is max-heap; invert for min-priority on f.
+        other.f.partial_cmp(&self.f).unwrap_or(Ordering::Equal)
+    }
+}
+impl PartialOrd for Node {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+fn neighbors_26() -> [(i32, i32, i32); 26] {
+    let mut out = [(0, 0, 0); 26];
+    let mut idx = 0;
+    for dx in -1..=1 {
+        for dy in -1..=1 {
+            for dz in -1..=1 {
+                if dx == 0 && dy == 0 && dz == 0 {
+                    continue;
+                }
+                out[idx] = (dx, dy, dz);
+                idx += 1;
+            }
+        }
+    }
+    out
+}
+
+fn step_distance(d: (i32, i32, i32)) -> f32 {
+    let s = (d.0 * d.0 + d.1 * d.1 + d.2 * d.2) as f32;
+    s.sqrt()
+}
+
+fn edge_cost(from: CoarseCell, to: CoarseCell, step_dist: f32) -> Option<f32> {
+    if matches!(to, CoarseCell::Blocked) {
+        return None;
+    }
+    let mult = match (from, to) {
+        (CoarseCell::Free, CoarseCell::Free) => 1.0,
+        (CoarseCell::Free, CoarseCell::Unknown) | (CoarseCell::Unknown, CoarseCell::Free) => {
+            PLANNER_UNKNOWN_COST_MULT
+        }
+        (CoarseCell::Unknown, CoarseCell::Unknown) => PLANNER_DEEP_UNKNOWN_MULT,
+        _ => return None,
+    };
+    Some(step_dist * PLANNER_FREE_COST * mult)
+}
+
+fn heuristic(a: UVec3, b: UVec3) -> f32 {
+    let dx = a.x as f32 - b.x as f32;
+    let dy = a.y as f32 - b.y as f32;
+    let dz = a.z as f32 - b.z as f32;
+    (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+/// A* on the coarse planner grid. Returns the sequence of coarse cells
+/// from `start` to `goal` inclusive, or `None` if unreachable.
+pub fn plan(grid: &PlannerGrid, start: UVec3, goal: UVec3) -> Option<Vec<UVec3>> {
+    if grid.idx(start).is_none() || grid.idx(goal).is_none() {
+        return None;
+    }
+    if matches!(grid.at(goal), CoarseCell::Blocked) {
+        return None;
+    }
+    let mut open = BinaryHeap::new();
+    let mut came_from: HashMap<UVec3, UVec3> = HashMap::new();
+    let mut g_score: HashMap<UVec3, f32> = HashMap::new();
+    g_score.insert(start, 0.0);
+    open.push(Node {
+        cell: start,
+        f: heuristic(start, goal),
+    });
+
+    let neighbors = neighbors_26();
+
+    while let Some(Node { cell, .. }) = open.pop() {
+        if cell == goal {
+            let mut path = vec![goal];
+            let mut cur = goal;
+            while let Some(&prev) = came_from.get(&cur) {
+                path.push(prev);
+                cur = prev;
+            }
+            path.reverse();
+            return Some(path);
+        }
+        let g_cur = *g_score.get(&cell).unwrap_or(&f32::INFINITY);
+        let from_state = grid.at(cell);
+        for d in &neighbors {
+            let nx = cell.x as i32 + d.0;
+            let ny = cell.y as i32 + d.1;
+            let nz = cell.z as i32 + d.2;
+            if nx < 0
+                || ny < 0
+                || nz < 0
+                || nx as u32 >= grid.dims.x
+                || ny as u32 >= grid.dims.y
+                || nz as u32 >= grid.dims.z
+            {
+                continue;
+            }
+            let next = UVec3::new(nx as u32, ny as u32, nz as u32);
+            let to_state = grid.at(next);
+            let step = step_distance(*d);
+            let Some(cost) = edge_cost(from_state, to_state, step) else {
+                continue;
+            };
+            let tentative = g_cur + cost;
+            if tentative < *g_score.get(&next).unwrap_or(&f32::INFINITY) {
+                came_from.insert(next, cell);
+                g_score.insert(next, tentative);
+                let f = tentative + heuristic(next, goal);
+                open.push(Node { cell: next, f });
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,5 +277,75 @@ mod tests {
         let bitset = make_bitset(dims, &[], &[]);
         let grid = PlannerGrid::downsample_from_bitset(dims, 1.0, &bitset, 8);
         assert_eq!(grid.coarse[0], CoarseCell::Unknown);
+    }
+
+    #[test]
+    fn astar_straight_line_through_free() {
+        let dims = UVec3::new(4, 1, 4);
+        let coarse = vec![CoarseCell::Free; 16];
+        let grid = PlannerGrid {
+            coarse,
+            dims,
+            voxel_size: 1.0,
+            downsample: 1,
+        };
+        let path = plan(&grid, UVec3::new(0, 0, 0), UVec3::new(3, 0, 3)).unwrap();
+        assert!(path.first() == Some(&UVec3::new(0, 0, 0)));
+        assert!(path.last() == Some(&UVec3::new(3, 0, 3)));
+        assert!(path.len() <= 4);
+    }
+
+    #[test]
+    fn astar_routes_around_blocked() {
+        let dims = UVec3::new(5, 1, 5);
+        let mut coarse = vec![CoarseCell::Free; 25];
+        // Block a wall at x=2 spanning z=0..4.
+        for z in 0..4 {
+            coarse[(z * dims.x + 2) as usize] = CoarseCell::Blocked;
+        }
+        let grid = PlannerGrid {
+            coarse,
+            dims,
+            voxel_size: 1.0,
+            downsample: 1,
+        };
+        let path = plan(&grid, UVec3::new(0, 0, 0), UVec3::new(4, 0, 0)).unwrap();
+        // Must detour through z=4 row.
+        assert!(path.iter().any(|c| c.z == 4));
+    }
+
+    #[test]
+    fn astar_unknown_costs_more() {
+        let dims = UVec3::new(3, 1, 3);
+        // Layout:
+        //  F U F
+        //  F U F
+        //  F F F
+        let mut coarse = vec![CoarseCell::Free; 9];
+        coarse[1] = CoarseCell::Unknown;
+        coarse[4] = CoarseCell::Unknown;
+        let grid = PlannerGrid {
+            coarse,
+            dims,
+            voxel_size: 1.0,
+            downsample: 1,
+        };
+        let path = plan(&grid, UVec3::new(0, 0, 0), UVec3::new(2, 0, 0)).unwrap();
+        // Direct-through-Unknown route would touch (1, 0, 0). Prefer detour via z=1.
+        assert!(!path.contains(&UVec3::new(1, 0, 0)));
+    }
+
+    #[test]
+    fn astar_no_path_through_blocked_wall() {
+        let dims = UVec3::new(3, 1, 1);
+        let mut coarse = vec![CoarseCell::Free; 3];
+        coarse[1] = CoarseCell::Blocked;
+        let grid = PlannerGrid {
+            coarse,
+            dims,
+            voxel_size: 1.0,
+            downsample: 1,
+        };
+        assert!(plan(&grid, UVec3::new(0, 0, 0), UVec3::new(2, 0, 0)).is_none());
     }
 }
