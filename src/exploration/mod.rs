@@ -1,0 +1,47 @@
+pub mod cluster;
+pub mod components;
+pub mod constants;
+pub mod planner;
+pub mod resources;
+pub mod scoring;
+pub mod steering;
+pub mod systems;
+
+use bevy::prelude::*;
+
+pub use components::{FrontierTarget, MovementHealth, Path};
+pub use resources::{CoarseCell, FrontierCluster, FrontierClusters, PlannerGrid};
+
+use crate::physics::PhysicsSet;
+use systems::{
+    assign_targets, compute_frontier_clusters, rebuild_planner_grid, replan_paths,
+    reactive_avoid, steer_along_path, stuck_recovery, update_movement_health,
+};
+
+pub struct ExplorationPlugin;
+
+impl Plugin for ExplorationPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<FrontierClusters>()
+            .init_resource::<PlannerGrid>()
+            .add_systems(
+                Update,
+                (
+                    rebuild_planner_grid,
+                    compute_frontier_clusters,
+                    assign_targets,
+                    replan_paths,
+                    update_movement_health,
+                    stuck_recovery,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                Update,
+                (steer_along_path, reactive_avoid)
+                    .after(replan_paths)
+                    .after(crate::drone::wander)
+                    .before(PhysicsSet::Control),
+            );
+    }
+}
