@@ -8,6 +8,7 @@
 - Tier 1 perf done: cached fibonacci sphere, allocation-free voxel traversal, persistent GPU instance buffer with `write_buffer`, visibility toggle fixed for lazily-spawned layer entities
 - Tier 2 partial: lidar runs `par_iter_mut` across drones, `VoxelMap.known` is a `HashSet<u32>` of flat indices on Bevy's FxHash-backed set
 - Tier 2 #6 done: `VoxelMap` keeps a `dirty_occupied` queue of flat indices. `sync_local_maps` drains per drone and appends per-color instances each frame instead of rebuilding the aggregated `Vec`. `InstancedVoxelLayer` carries a generation counter; `prepare_instance_buffers` streams the new tail to GPU when the gen matches and re-uploads from offset 0 on a drone-count change
+- Tier 2 #7 done: hand-rolled extract system in `ExtractSchedule` only clones `InstancedVoxelLayer` Main→Render when `Ref::is_changed()`. `SyncToRenderWorld` is wired in via `register_required_components`, so spawn sites stay unchanged
 
 `cargo build` is warning-free. `cargo run` smoke-tested clean. Working tree clean.
 
@@ -30,12 +31,8 @@ Fix auth (`gh auth login` or correct credential helper), then `git push` from th
 
 ## Next perf wins, in order
 
-### Tier 2 #7 — Extract-on-changed
-`ExtractComponentPlugin::<InstancedVoxelLayer>` still clones the full `Vec<InstanceData>` Main→Render every frame even when only a few instances appended (or none). With #6 in place, the Vec grows monotonically until respawn, so the clone cost climbs over a session.
-
-Sketch:
-- Hand-roll an extract system in `ExtractSchedule` that owns the render-world handle and only re-clones on `Changed<InstancedVoxelLayer>`. Falling back to `ExtractComponent` with `Ref::is_changed()` returning `None` would remove the component on the render side — not what we want.
-- For pure-append frames, consider extracting just the new tail + generation; render side appends to its mirror. Bigger refactor; defer until clone cost shows up in profiles.
+### Future Tier 2 polish — Tail-only extract
+Even with `Ref::is_changed()` gating, on append frames the extract still clones the *full* `Vec<InstanceData>`. For pure-append frames we could extract just the new tail + generation and have the render-side append to its mirror. Bigger refactor (need a render-world mirror component plus reset on gen bump); defer until clone cost shows up in profiles.
 
 Files: `src/render/instancing/mod.rs`.
 
