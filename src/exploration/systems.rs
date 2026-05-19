@@ -3,11 +3,16 @@ use bevy::prelude::*;
 
 use crate::comms::CommsState;
 use crate::drone::{Drone, DroneId};
+use crate::physics::LinearVelocity;
 
 use super::components::{FrontierTarget, MovementHealth, Path};
-use super::constants::{FRONTIER_REACHED_DIST, SCORE_UPGRADE_RATIO};
+use super::constants::{
+    FRONTIER_REACHED_DIST, SCORE_UPGRADE_RATIO, STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS,
+    STUCK_VEL_MPS,
+};
 use super::resources::FrontierClusters;
 use super::scoring::{crowding_for, score, ScoringWeights};
+use rand::RngExt;
 
 pub fn assign_targets(
     clusters: Res<FrontierClusters>,
@@ -101,7 +106,67 @@ pub fn compute_frontier_clusters() {
 }
 pub fn rebuild_planner_grid() {}
 pub fn replan_paths() {}
-pub fn update_movement_health() {}
-pub fn stuck_recovery() {}
+pub fn update_movement_health(
+    time: Res<Time>,
+    mut q: Query<(&LinearVelocity, &mut MovementHealth), With<Drone>>,
+) {
+    let dt = time.delta_secs();
+    for (linvel, mut health) in &mut q {
+        if linvel.0.length() < STUCK_VEL_MPS {
+            health.slow_secs += dt;
+        } else {
+            health.slow_secs = 0.0;
+        }
+    }
+}
+
+pub fn stuck_recovery(
+    time: Res<Time>,
+    world: Res<crate::world::WorldConfig>,
+    mut q: Query<(
+        &mut Transform,
+        &mut LinearVelocity,
+        &mut MovementHealth,
+        &mut Path,
+    ), With<Drone>>,
+) {
+    let now = time.elapsed_secs();
+    let mut rng = rand::rng();
+    for (mut transform, mut linvel, mut health, mut path) in &mut q {
+        if health.slow_secs < STUCK_SECS {
+            continue;
+        }
+        health.slow_secs = 0.0;
+
+        // Force replan by clearing the path.
+        path.waypoints.clear();
+        path.cursor = 0;
+
+        // Apply random kick (small impulse) to escape local minima.
+        let kick = Vec3::new(
+            rng.random_range(-2.0..2.0),
+            rng.random_range(-0.5..0.5),
+            rng.random_range(-2.0..2.0),
+        );
+        linvel.0 += kick;
+
+        // Bookkeeping for escalation.
+        let window_open = now - health.window_start_secs < STUCK_ESCALATION_WINDOW_SECS;
+        if window_open {
+            health.escalations_in_window += 1;
+        } else {
+            health.window_start_secs = now;
+            health.escalations_in_window = 1;
+        }
+
+        if health.escalations_in_window >= 3 {
+            // Final fallback: teleport to world center.
+            warn!("drone stuck after 3 escalations — teleporting to world center");
+            transform.translation = world.center();
+            linvel.0 = Vec3::ZERO;
+            health.escalations_in_window = 0;
+        }
+    }
+}
 pub fn steer_along_path() {}
 pub fn reactive_avoid() {}
