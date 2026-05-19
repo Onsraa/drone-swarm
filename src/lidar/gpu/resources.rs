@@ -6,8 +6,11 @@ use bevy::render::storage::ShaderStorageBuffer;
 use crate::world::GroundTruthMap;
 
 use super::super::constants::RAYS_PER_SCAN;
-use super::super::sampling::LidarRayDirs;
+use super::super::sampling::{build_role_ray_buffer, RoleConeRange};
 use super::per_drone_scan::{allocate_buffer as alloc_scan_params, DroneScanParamsBuffer};
+
+#[derive(Resource, Clone, Copy, Debug)]
+pub struct RoleConeRanges(pub [RoleConeRange; 3]);
 
 pub const MAX_STEPS_PER_RAY: u32 = 96;
 pub const MAX_DRONES_GPU: u32 = 50;
@@ -129,7 +132,6 @@ pub fn setup_gpu_lidar_assets(
     mut commands: Commands,
     mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
     ground: Res<GroundTruthMap>,
-    ray_dirs_res: Res<LidarRayDirs>,
 ) {
     let bitset = ground.pack_bitset();
     let mut ground_buf = ShaderStorageBuffer::from(bitset);
@@ -163,18 +165,15 @@ pub fn setup_gpu_lidar_assets(
     orientations_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
     let orientations_handle = buffers.add(orientations_buf);
 
-    // Allocate at the slider's max width so runtime changes to
-    // `LidarSettings.rays_per_scan` never need to reallocate. Initial
-    // contents = the first `RAYS_PER_SCAN` entries from the default
-    // fibonacci cone; trailing slots stay zero until the
-    // `upload_ray_dirs` system rewrites them on a settings change.
-    let mut ray_dirs: Vec<Vec4> =
-        vec![Vec4::ZERO; super::super::constants::MAX_RAYS_PER_SCAN as usize];
-    for (i, dir) in ray_dirs_res.0.iter().enumerate() {
+    // Build the role-specific concatenated ray buffer.
+    let (ray_dirs_vec, role_ranges) = build_role_ray_buffer();
+    let max_ray_slots = crate::lidar::constants::MAX_RAYS_PER_SCAN as usize;
+    let mut ray_dirs: Vec<Vec4> = vec![Vec4::ZERO; max_ray_slots.max(ray_dirs_vec.len())];
+    for (i, d) in ray_dirs_vec.iter().enumerate() {
         if i >= ray_dirs.len() {
             break;
         }
-        ray_dirs[i] = Vec4::new(dir.x, dir.y, dir.z, 0.0);
+        ray_dirs[i] = Vec4::new(d.x, d.y, d.z, 0.0);
     }
     let mut dirs_buf = ShaderStorageBuffer::from(ray_dirs);
     dirs_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
@@ -271,4 +270,5 @@ pub fn setup_gpu_lidar_assets(
     commands.insert_resource(LidarPointCountBuffer(point_count_handle));
     commands.insert_resource(LidarPointVecBuffer(point_vec_handle));
     commands.insert_resource(DroneScanParamsBuffer(scan_params_handle));
+    commands.insert_resource(RoleConeRanges(role_ranges));
 }

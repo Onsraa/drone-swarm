@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use super::constants::{LIDAR_CONE_HALF_ANGLE_DEGREES, RAYS_PER_SCAN};
+use crate::exploration::Role;
 
 /// Precomputed ray directions for each lidar scan. Stored in the drone's
 /// local frame, with the cone axis aligned to Bevy's body-forward (`-Z`);
@@ -20,6 +21,41 @@ impl LidarRayDirs {
             LIDAR_CONE_HALF_ANGLE_DEGREES.to_radians(),
         )
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RoleConeRange {
+    pub role: Role,
+    pub offset: u32,
+    pub count: u32,
+}
+
+pub fn build_role_ray_buffer() -> (Vec<Vec3>, [RoleConeRange; 3]) {
+    let scout = fibonacci_cone(32, 15.0_f32.to_radians());
+    let mapper = fibonacci_cone(128, 90.0_f32.to_radians());
+    let anchor = fibonacci_cone(64, 180.0_f32.to_radians());
+    let mut all = Vec::with_capacity(scout.len() + mapper.len() + anchor.len());
+    let ranges = [
+        RoleConeRange {
+            role: Role::Scout,
+            offset: 0,
+            count: scout.len() as u32,
+        },
+        RoleConeRange {
+            role: Role::Mapper,
+            offset: scout.len() as u32,
+            count: mapper.len() as u32,
+        },
+        RoleConeRange {
+            role: Role::Anchor,
+            offset: (scout.len() + mapper.len()) as u32,
+            count: anchor.len() as u32,
+        },
+    ];
+    all.extend(scout);
+    all.extend(mapper);
+    all.extend(anchor);
+    (all, ranges)
 }
 
 /// `n` approximately-uniformly-spaced unit vectors inside a spherical cap

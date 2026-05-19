@@ -11,7 +11,7 @@ pub use resources::{
     BuildLocalParamsBuffer, DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer,
     GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, GlobalOccupancyBuffer, GroundTruthBuffer,
     LidarParamsBuffer, LidarPointCountBuffer, LidarPointVecBuffer, LocalInstanceCountBuffer,
-    LocalInstanceVecBuffer, LocalOccupancyBuffer, RayDirsBuffer,
+    LocalInstanceVecBuffer, LocalOccupancyBuffer, RayDirsBuffer, RoleConeRanges,
 };
 
 use bevy::prelude::*;
