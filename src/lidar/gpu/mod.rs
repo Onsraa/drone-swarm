@@ -2,9 +2,11 @@ mod build_global_pass;
 mod build_pass;
 mod dispatch;
 mod merge_pass;
+mod per_drone_scan;
 mod pipeline;
 mod resources;
 
+pub use per_drone_scan::{DroneScanParams, DroneScanParamsBuffer};
 pub use resources::{
     BuildLocalParamsBuffer, DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer,
     GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, GlobalOccupancyBuffer, GroundTruthBuffer,
@@ -86,6 +88,7 @@ impl Plugin for GpuLidarPlugin {
             .add_plugins(ExtractResourcePlugin::<GlobalInstanceVecBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LidarPointCountBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LidarPointVecBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<DroneScanParamsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LidarSettings>::default())
             .add_plugins(ExtractResourcePlugin::<LidarFrameCounter>::default())
             .add_systems(

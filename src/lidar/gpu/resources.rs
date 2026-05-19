@@ -7,6 +7,7 @@ use crate::world::GroundTruthMap;
 
 use super::super::constants::RAYS_PER_SCAN;
 use super::super::sampling::LidarRayDirs;
+use super::per_drone_scan::{allocate_buffer as alloc_scan_params, DroneScanParamsBuffer};
 
 pub const MAX_STEPS_PER_RAY: u32 = 96;
 pub const MAX_DRONES_GPU: u32 = 50;
@@ -243,6 +244,8 @@ pub fn setup_gpu_lidar_assets(
         BufferUsages::COPY_SRC | BufferUsages::COPY_DST | BufferUsages::VERTEX;
     let point_vec_handle = buffers.add(point_vec_buf);
 
+    let scan_params_handle = alloc_scan_params(&mut buffers);
+
     info!(
         "GPU lidar buffers allocated: {} drone slots, {} rays/scan, {} steps/ray, {} occupancy u32s ({} words/drone)",
         MAX_DRONES_GPU,
@@ -267,4 +270,5 @@ pub fn setup_gpu_lidar_assets(
     commands.insert_resource(GlobalInstanceVecBuffer(global_instance_vec_handle));
     commands.insert_resource(LidarPointCountBuffer(point_count_handle));
     commands.insert_resource(LidarPointVecBuffer(point_vec_handle));
+    commands.insert_resource(DroneScanParamsBuffer(scan_params_handle));
 }
