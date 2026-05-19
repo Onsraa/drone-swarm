@@ -12,5 +12,29 @@ pub struct InstanceData {
 
 /// Holds the per-instance buffer source for one rendered voxel layer
 /// (ground truth, global map, or all local maps aggregated).
-#[derive(Component, Clone, Deref)]
-pub struct InstancedVoxelLayer(pub Vec<InstanceData>);
+///
+/// `generation` bumps whenever `data` is rewritten in place (`replace`).
+/// Append-only growth (`append`) keeps the generation stable so the GPU
+/// uploader can stream the new tail instead of re-uploading from offset 0.
+#[derive(Component, Clone)]
+pub struct InstancedVoxelLayer {
+    pub data: Vec<InstanceData>,
+    pub generation: u32,
+}
+
+impl InstancedVoxelLayer {
+    pub fn new(data: Vec<InstanceData>) -> Self {
+        Self { data, generation: 1 }
+    }
+
+    /// Full rewrite. Bumps generation so the GPU buffer re-uploads from 0.
+    pub fn replace(&mut self, data: Vec<InstanceData>) {
+        self.data = data;
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    /// Append-only. Generation unchanged — uploader streams the tail.
+    pub fn append<I: IntoIterator<Item = InstanceData>>(&mut self, items: I) {
+        self.data.extend(items);
+    }
+}

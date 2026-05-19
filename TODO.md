@@ -7,6 +7,7 @@
 - FPS overlay in the egui side panel
 - Tier 1 perf done: cached fibonacci sphere, allocation-free voxel traversal, persistent GPU instance buffer with `write_buffer`, visibility toggle fixed for lazily-spawned layer entities
 - Tier 2 partial: lidar runs `par_iter_mut` across drones, `VoxelMap.known` is a `HashSet<u32>` of flat indices on Bevy's FxHash-backed set
+- Tier 2 #6 done: `VoxelMap` keeps a `dirty_occupied` queue of flat indices. `sync_local_maps` drains per drone and appends per-color instances each frame instead of rebuilding the aggregated `Vec`. `InstancedVoxelLayer` carries a generation counter; `prepare_instance_buffers` streams the new tail to GPU when the gen matches and re-uploads from offset 0 on a drone-count change
 
 `cargo build` is warning-free. `cargo run` smoke-tested clean. Working tree clean.
 
@@ -29,23 +30,14 @@ Fix auth (`gh auth login` or correct credential helper), then `git push` from th
 
 ## Next perf wins, in order
 
-### Tier 2 #6 — Incremental local-map rebuild
-`sync_local_maps` still rebuilds the full aggregated `InstancedVoxelLayer` every frame any drone scans. `Occupied` is sticky so we can append only newly-occupied cells instead.
+### Tier 2 #7 — Extract-on-changed
+`ExtractComponentPlugin::<InstancedVoxelLayer>` still clones the full `Vec<InstanceData>` Main→Render every frame even when only a few instances appended (or none). With #6 in place, the Vec grows monotonically until respawn, so the clone cost climbs over a session.
 
 Sketch:
-- `VoxelMap`: add a `dirty_occupied: Vec<u32>` that records flat indices transitioned to Occupied since last drain, plus `pub fn drain_dirty_occupied(&mut self) -> Vec<u32>`.
-- Choice: keep one aggregated layer entity and track per-drone segments inside it, OR split into one entity per drone (N draws but trivial append).
-- With the existing persistent buffer, push the appended slice via `RenderQueue::write_buffer(buffer, offset_bytes, &new_bytes)` — no full re-upload.
-- Full rebuild only on drone respawn (count change) — existing path already handles it.
+- Hand-roll an extract system in `ExtractSchedule` that owns the render-world handle and only re-clones on `Changed<InstancedVoxelLayer>`. Falling back to `ExtractComponent` with `Ref::is_changed()` returning `None` would remove the component on the render side — not what we want.
+- For pure-append frames, consider extracting just the new tail + generation; render side appends to its mirror. Bigger refactor; defer until clone cost shows up in profiles.
 
-Files: `src/map/voxel_map.rs`, `src/render/local_map.rs`, `src/render/instancing/buffer.rs`.
-
-### Tier 2 (skipped earlier) — Extract-on-changed
-`ExtractComponentPlugin::<InstancedVoxelLayer>` clones the full `Vec<InstanceData>` Main→Render every frame even when nothing changed. Two options:
-- Switch `ExtractComponent::QueryData` to `Ref<'static, InstancedVoxelLayer>` and only return `Some(...)` when `is_changed()`; downside: returning `None` removes the component on the render side.
-- Hand-roll an extract system in `ExtractSchedule` that holds the render-world handle and only re-clones on `Changed<InstancedVoxelLayer>`.
-
-Pairs well with #6 above. Tackle them together.
+Files: `src/render/instancing/mod.rs`.
 
 ### Tier 3 #8 — GPU compute lidar
 Move `GroundTruthMap` into a GPU storage buffer. Compute pass keyed on `(drone_index, ray_index)` does Amanatides-Woo on the GPU and writes hits to a per-drone SSBO that the existing instance buffer can consume.

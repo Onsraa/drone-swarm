@@ -29,12 +29,12 @@ pub fn sync_global_map(
     let instances = build_instances(&global, config.voxel_size);
 
     if let Ok(mut layer) = layer_q.single_mut() {
-        layer.0 = instances;
+        layer.replace(instances);
     } else if !instances.is_empty() {
         commands.spawn((
             GlobalMapVoxel,
             Mesh3d(cube.0.clone()),
-            InstancedVoxelLayer(instances),
+            InstancedVoxelLayer::new(instances),
             NoFrustumCulling,
             Transform::IDENTITY,
             Visibility::default(),

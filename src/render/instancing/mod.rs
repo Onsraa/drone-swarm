@@ -25,7 +25,7 @@ impl ExtractComponent for InstancedVoxelLayer {
     type Out = Self;
 
     fn extract_component(item: QueryItem<'_, '_, Self::QueryData>) -> Option<Self> {
-        Some(InstancedVoxelLayer(item.0.clone()))
+        Some(item.clone())
     }
 }
 

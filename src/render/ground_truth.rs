@@ -19,7 +19,7 @@ pub fn spawn_ground_truth_layer(
     commands.spawn((
         GroundTruthVoxel,
         Mesh3d(cube.0.clone()),
-        InstancedVoxelLayer(instances),
+        InstancedVoxelLayer::new(instances),
         NoFrustumCulling,
         Transform::IDENTITY,
         Visibility::default(),
