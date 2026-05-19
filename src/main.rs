@@ -18,7 +18,7 @@ mod world;
 use camera::OrbitCameraPlugin;
 use debug::DebugPlugin;
 use drone::DronePlugin;
-use lidar::LidarPlugin;
+use lidar::{GpuLidarPlugin, LidarPlugin};
 use lighting::LightingPlugin;
 use merge::MergePlugin;
 use physics::PhysicsPlugin;
@@ -45,6 +45,7 @@ fn main() {
         .add_plugins(PhysicsPlugin)
         .add_plugins(DronePlugin)
         .add_plugins(LidarPlugin)
+        .add_plugins(GpuLidarPlugin)
         .add_plugins(MergePlugin)
         .add_plugins(OrbitCameraPlugin)
         .add_plugins(UiPlugin)

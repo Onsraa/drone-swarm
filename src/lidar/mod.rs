@@ -1,5 +1,6 @@
 mod components;
 mod constants;
+mod gpu;
 mod resources;
 mod sampling;
 mod scan;
@@ -8,6 +9,7 @@ mod traversal;
 use bevy::prelude::*;
 
 pub use components::LastScanRays;
+pub use gpu::GpuLidarPlugin;
 
 use constants::SCAN_INTERVAL_SECS;
 use resources::ScanTimer;

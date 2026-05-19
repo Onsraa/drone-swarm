@@ -48,4 +48,19 @@ impl GroundTruthMap {
     pub fn count_occupied(&self) -> usize {
         self.cells.iter().filter(|c| **c).count()
     }
+
+    /// Packs the boolean grid into a `Vec<u32>` of `ceil(N/32)` words, with
+    /// flat-index `i` mapped to bit `i % 32` of word `i / 32`. Matches the
+    /// shape the GPU compute lidar expects in its storage buffer.
+    pub fn pack_bitset(&self) -> Vec<u32> {
+        let n = self.cells.len();
+        let words = n.div_ceil(32);
+        let mut out = vec![0u32; words];
+        for (i, &occupied) in self.cells.iter().enumerate() {
+            if occupied {
+                out[i / 32] |= 1u32 << (i % 32);
+            }
+        }
+        out
+    }
 }
