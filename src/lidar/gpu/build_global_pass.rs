@@ -123,7 +123,7 @@ impl render_graph::Node for BuildGlobalNode {
 
         let dims = crate::world::WorldConfig::default().size;
         let cells_per_drone = dims.x * dims.y * dims.z;
-        let groups_x = cells_per_drone.div_ceil(64);
+        let groups_x = cells_per_drone.div_ceil(256);
 
         let encoder = render_context.command_encoder();
         encoder.clear_buffer(&count_buf.buffer, 0, None);

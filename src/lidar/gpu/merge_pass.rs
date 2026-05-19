@@ -119,7 +119,7 @@ impl render_graph::Node for MergeGlobalNode {
         let dims = crate::world::WorldConfig::default().size;
         let cells_per_drone = dims.x * dims.y * dims.z;
         let words_per_drone = cells_per_drone.div_ceil(16);
-        let groups_x = words_per_drone.div_ceil(64);
+        let groups_x = words_per_drone.div_ceil(256);
 
         let encoder = render_context.command_encoder();
         // Reset the global SSBO each frame; the merge OR-folds fresh

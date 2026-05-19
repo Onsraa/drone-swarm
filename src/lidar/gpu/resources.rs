@@ -9,18 +9,20 @@ use super::super::constants::RAYS_PER_SCAN;
 use super::super::sampling::LidarRayDirs;
 
 pub const MAX_STEPS_PER_RAY: u32 = 96;
-pub const MAX_DRONES_GPU: u32 = 64;
+pub const MAX_DRONES_GPU: u32 = 50;
 
 /// Stage 9B output buffer capacity: max number of Occupied-cell instances
-/// the build pass can emit across all drones in a single dispatch. 1M
-/// instances at 32 bytes each = 32 MB. Steady state in a 50-drone session
-/// is hundreds of thousands; this is generous headroom.
-pub const MAX_LOCAL_INSTANCES: u32 = 1_000_000;
+/// the build pass can emit across all drones in a single dispatch. At
+/// 640×24×640 with 50 drones, steady-state local-map coverage can hit
+/// millions of cells in aggregate; 2M slots is a soft cap that gracefully
+/// truncates visual output via the shader's `slot >= max_instances` check.
+pub const MAX_LOCAL_INSTANCES: u32 = 2_000_000;
 
 /// Stage 9Eb output capacity. The merged central map has at most one
-/// instance per cell (`cells_per_drone` <= 98K for the default world),
-/// so 100K slots is plenty. 3.2 MB at 32 bytes each.
-pub const MAX_GLOBAL_INSTANCES: u32 = 100_000;
+/// instance per cell. At 640×24×640 the world holds ~9.8M cells; in
+/// practice only a few hundred thousand are Occupied at any time (floor
+/// + clusters). 1M slots is generous headroom.
+pub const MAX_GLOBAL_INSTANCES: u32 = 1_000_000;
 
 /// Per-drone local-map occupancy is packed as 2 bits per cell into a
 /// `u32` storage buffer: bit 0 = Free flag, bit 1 = Occupied flag. Both

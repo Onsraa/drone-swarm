@@ -131,7 +131,7 @@ impl render_graph::Node for BuildLocalNode {
         // safe even if the world is smaller than the constant.
         let dims = crate::world::WorldConfig::default().size;
         let cells_per_drone = dims.x * dims.y * dims.z;
-        let groups_x = cells_per_drone.div_ceil(64);
+        let groups_x = cells_per_drone.div_ceil(256);
         let groups_y = super::resources::MAX_DRONES_GPU;
 
         let encoder = render_context.command_encoder();

@@ -16,7 +16,7 @@ struct BuildParams {
 @group(0) @binding(1) var<storage, read> params: BuildParams;
 @group(0) @binding(2) var<storage, read_write> global_occupancy: array<u32>;
 
-@compute @workgroup_size(64, 1, 1)
+@compute @workgroup_size(256, 1, 1)
 fn merge_global(@builtin(global_invocation_id) gid: vec3<u32>) {
     let w = gid.x;
     let cells_per_drone = params.dims.x * params.dims.y * params.dims.z;

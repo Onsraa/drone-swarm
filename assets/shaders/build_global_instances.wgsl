@@ -18,9 +18,9 @@ struct BuildParams {
 const GLOBAL_COLOR: vec4<f32> = vec4<f32>(0.1, 0.85, 1.0, 0.7);
 const GLOBAL_SCALE_FACTOR: f32 = 1.01;
 // Max instances the buffer holds (matches the CPU-side allocation).
-const GLOBAL_MAX_INSTANCES: u32 = 100000u;
+const GLOBAL_MAX_INSTANCES: u32 = 1000000u;
 
-@compute @workgroup_size(64, 1, 1)
+@compute @workgroup_size(256, 1, 1)
 fn build_global(@builtin(global_invocation_id) gid: vec3<u32>) {
     let cell_flat = gid.x;
     let cells_per_drone = params.dims.x * params.dims.y * params.dims.z;

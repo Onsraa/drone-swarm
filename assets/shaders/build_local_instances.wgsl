@@ -21,7 +21,7 @@ struct BuildParams {
 @group(0) @binding(3) var<storage, read_write> instance_count: atomic<u32>;
 @group(0) @binding(4) var<storage, read_write> instance_buffer: array<vec4<f32>>;
 
-@compute @workgroup_size(64, 1, 1)
+@compute @workgroup_size(256, 1, 1)
 fn build(@builtin(global_invocation_id) gid: vec3<u32>) {
     let cell_flat = gid.x;
     let drone_idx = gid.y;

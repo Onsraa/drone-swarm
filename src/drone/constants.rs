@@ -8,7 +8,7 @@ pub const DEFAULT_DRONE_COUNT: u32 = 3;
 pub const MIN_DRONE_COUNT: u32 = 1;
 pub const MAX_DRONE_COUNT: u32 = 50;
 /// Horizontal radius (meters) of the spawn ring around the world center.
-pub const DRONE_SPAWN_RADIUS_METERS: f32 = 12.0;
+pub const DRONE_SPAWN_RADIUS_METERS: f32 = 120.0;
 /// Golden-angle-in-degrees offset between consecutive drone hues so 50+
 /// drones still get well-spaced, perceptually distinct colors.
 pub const DRONE_HUE_STEP_DEGREES: f32 = 137.508;
