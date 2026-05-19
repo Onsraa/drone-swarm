@@ -1,30 +1,22 @@
 mod components;
 mod constants;
 mod gpu;
-mod resources;
 mod sampling;
-mod scan;
-mod traversal;
 
 use bevy::prelude::*;
 
 pub use components::LastScanRays;
 pub use gpu::GpuLidarPlugin;
 
-use constants::SCAN_INTERVAL_SECS;
-use resources::ScanTimer;
 use sampling::LidarRayDirs;
-use scan::lidar_scan;
 
+/// Holds the cached fibonacci-cone ray directions used by the GPU lidar
+/// shader. The actual traversal lives in `gpu::*`; this plugin only owns
+/// the inputs the GPU side reads.
 pub struct LidarPlugin;
 
 impl Plugin for LidarPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(ScanTimer(Timer::from_seconds(
-            SCAN_INTERVAL_SECS,
-            TimerMode::Repeating,
-        )))
-        .insert_resource(LidarRayDirs::default_for_scan())
-        .add_systems(Update, lidar_scan);
+        app.insert_resource(LidarRayDirs::default_for_scan());
     }
 }

@@ -12,7 +12,9 @@ use crate::drone::{Drone, DroneId};
 use crate::map::{unflatten, CellState, LocalMap};
 use crate::world::WorldConfig;
 
-use dispatch::{add_compute_render_graph_node, prepare_lidar_bind_group, LidarBindGroup};
+use super::components::LastScanRays;
+
+use dispatch::{add_compute_render_graph_node, prepare_lidar_bind_group};
 use pipeline::init_compute_lidar_pipeline;
 use resources::{
     setup_gpu_lidar_assets, DroneOrientationsBuffer, DronePositionsBuffer, GroundTruthBuffer,
@@ -61,9 +63,10 @@ impl Plugin for GpuLidarPlugin {
             )
             .add_systems(
                 Render,
-                prepare_lidar_bind_group
-                    .in_set(RenderSystems::PrepareBindGroups)
-                    .run_if(not(resource_exists::<LidarBindGroup>)),
+                // `set_data` each frame re-prepares the storage buffers as
+                // brand-new GPU Buffer handles, so the bind group must
+                // rebuild every frame to point at the live ones.
+                prepare_lidar_bind_group.in_set(RenderSystems::PrepareBindGroups),
             );
     }
 }
@@ -133,28 +136,37 @@ fn upload_drone_state(
     }
 }
 
-/// Drain the latest GPU hits and fold them into each drone's `LocalMap`.
-/// Each `(drone_idx, ray, step)` entry packs state and flat-cell index;
-/// the trail terminates at the first `0` sentinel or `Occupied` entry.
+/// Drain the latest GPU hits, fold each cell into the drone's `LocalMap`
+/// via `upgrade()`, and rebuild the ray-viz endpoints (`LastScanRays`)
+/// from the same trail data. With this, the CPU does no traversal work
+/// at all — only the per-cell `upgrade()` plus an `IVec3 -> Vec3` mapping
+/// for the gizmo line endpoints.
 fn apply_lidar_hits(
     mut pending: ResMut<PendingLidarHits>,
-    mut drones: Query<(&DroneId, &mut LocalMap), With<Drone>>,
+    mut drones: Query<
+        (&DroneId, &Transform, &mut LocalMap, Option<&mut LastScanRays>),
+        With<Drone>,
+    >,
     config: Res<WorldConfig>,
 ) {
     let Some(hits) = pending.0.take() else {
         return;
     };
     let dims = config.size;
+    let voxel_size = config.voxel_size;
     let rays = RAYS_PER_SCAN;
     let max_steps = MAX_STEPS_PER_RAY as usize;
 
-    for (id, mut local) in drones.iter_mut() {
+    for (id, transform, mut local, rays_opt) in drones.iter_mut() {
         let drone_idx = id.0 as usize;
         if drone_idx >= MAX_DRONES_GPU as usize {
             continue;
         }
+        let origin_world = transform.translation;
+        let mut viz_rays: Vec<(Vec3, Vec3)> = Vec::with_capacity(rays);
         for ray_idx in 0..rays {
             let base = (drone_idx * rays + ray_idx) * max_steps;
+            let mut last_cell: Option<IVec3> = None;
             for step in 0..max_steps {
                 let entry = hits[base + step];
                 if entry == 0 {
@@ -163,6 +175,7 @@ fn apply_lidar_hits(
                 let state = entry >> 30;
                 let flat = entry & 0x3FFF_FFFF;
                 let cell = unflatten(flat, dims);
+                last_cell = Some(cell);
                 let cs = match state {
                     1 => CellState::Free,
                     2 => CellState::Occupied,
@@ -173,6 +186,13 @@ fn apply_lidar_hits(
                     break;
                 }
             }
+            if let Some(cell) = last_cell {
+                let end_world = (cell.as_vec3() + Vec3::splat(0.5)) * voxel_size;
+                viz_rays.push((origin_world, end_world));
+            }
+        }
+        if let Some(mut rays_mut) = rays_opt {
+            rays_mut.0 = viz_rays;
         }
     }
 }
