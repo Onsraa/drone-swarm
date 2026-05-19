@@ -1,56 +1,46 @@
 use bevy::prelude::*;
-use bevy::render::render_resource::{Buffer, BufferUsages};
-use bevy::render::renderer::RenderDevice;
-use bevy::render::Extract;
+use bevy::render::extract_resource::ExtractResource;
+use bevy::render::render_resource::BufferUsages;
+use bevy::render::storage::ShaderStorageBuffer;
 
 use crate::world::GroundTruthMap;
 
-/// Wrapper around the GPU storage buffer holding the packed ground-truth
-/// bitset. Held in the render world. Lives in a `Slot` so the upload can
-/// happen lazily on the first frame the main-world `GroundTruthMap`
-/// resource is observed.
-///
-/// Fields are read by the compute pipeline once it lands; suppress the
-/// dead-code warning until then.
-#[allow(dead_code)]
-pub struct GroundTruthGpu {
-    pub buffer: Buffer,
-    pub dims: UVec3,
-    pub bitset_words: u32,
-}
+/// Handle to the storage buffer holding the packed ground-truth bitset.
+/// Created once at startup; mirrored into the render world via
+/// `ExtractResourcePlugin`.
+#[derive(Resource, ExtractResource, Clone)]
+pub struct GroundTruthBuffer(pub Handle<ShaderStorageBuffer>);
 
-#[derive(Resource, Default)]
-pub struct GroundTruthGpuSlot {
-    pub gpu: Option<GroundTruthGpu>,
-}
+/// Handle to the Stage-2 sanity output buffer (single `u32` = number of
+/// occupied cells the compute shader counted). Replaced in later stages by
+/// the per-(drone, ray) hit buffer.
+#[derive(Resource, ExtractResource, Clone)]
+pub struct LidarCountBuffer(pub Handle<ShaderStorageBuffer>);
 
-pub fn ensure_ground_truth_gpu(
-    mut slot: ResMut<GroundTruthGpuSlot>,
-    render_device: Res<RenderDevice>,
-    ground: Extract<Option<Res<GroundTruthMap>>>,
+/// One-shot startup system: packs the CPU ground truth to a `u32` bitset,
+/// uploads it as a `ShaderStorageBuffer` asset, and creates the matching
+/// output buffer. Both handles are inserted as resources so the render
+/// world can pick them up via `ExtractResource`.
+pub fn upload_ground_truth_to_gpu(
+    mut commands: Commands,
+    mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
+    ground: Res<GroundTruthMap>,
 ) {
-    if slot.gpu.is_some() {
-        return;
-    }
-    let Some(ground) = ground.as_deref() else {
-        return;
-    };
     let bitset = ground.pack_bitset();
-    let bytes: &[u8] = bytemuck::cast_slice(&bitset);
-    let buffer = render_device.create_buffer_with_data(&bevy::render::render_resource::BufferInitDescriptor {
-        label: Some("ground truth bitset"),
-        contents: bytes,
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-    });
+    let bitset_len = bitset.len();
+    let mut ground_buffer = ShaderStorageBuffer::from(bitset);
+    ground_buffer.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let ground_handle = buffers.add(ground_buffer);
+
+    let mut count_buffer = ShaderStorageBuffer::from(vec![0u32]);
+    count_buffer.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let count_handle = buffers.add(count_buffer);
+
     info!(
-        "uploaded ground-truth bitset to GPU: {} bytes, {} words for dims {:?}",
-        bytes.len(),
-        bitset.len(),
-        ground.dims
+        "uploaded ground-truth bitset to GPU: {} words for dims {:?}",
+        bitset_len, ground.dims
     );
-    slot.gpu = Some(GroundTruthGpu {
-        buffer,
-        dims: ground.dims,
-        bitset_words: bitset.len() as u32,
-    });
+
+    commands.insert_resource(GroundTruthBuffer(ground_handle));
+    commands.insert_resource(LidarCountBuffer(count_handle));
 }
