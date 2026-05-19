@@ -124,9 +124,9 @@ impl render_graph::Node for ComputeLidarNode {
         if frame % interval != 0 {
             return Ok(());
         }
-        // Zero the point counter every active-scan frame so the point
-        // cloud reflects "this scan's hits" rather than an unbounded
-        // ring of history.
+        // Live mode zeroes the point counter every active-scan frame
+        // so the cloud reflects "this scan's hits". Sticky mode keeps
+        // the counter monotonic so each scan appends to the buffer.
         let buffers = world.resource::<RenderAssets<GpuShaderStorageBuffer>>();
         let Some(point_count_handle) = world.get_resource::<LidarPointCountBuffer>() else {
             return Ok(());
@@ -136,7 +136,9 @@ impl render_graph::Node for ComputeLidarNode {
         };
 
         let encoder = render_context.command_encoder();
-        encoder.clear_buffer(&point_count_buf.buffer, 0, None);
+        if !settings.sticky_spray {
+            encoder.clear_buffer(&point_count_buf.buffer, 0, None);
+        }
         let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("compute lidar pass"),
             ..default()

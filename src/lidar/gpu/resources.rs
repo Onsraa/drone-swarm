@@ -11,10 +11,12 @@ use super::super::sampling::LidarRayDirs;
 pub const MAX_STEPS_PER_RAY: u32 = 96;
 pub const MAX_DRONES_GPU: u32 = 50;
 
-/// Soft cap on points the lidar compute pass can append in a single
-/// frame. At 50 drones * 64 rays = 3200 max per scan, this leaves
-/// headroom for the future "accumulating" mode (no per-frame reset).
-pub const MAX_LIDAR_POINTS: u32 = 16_384;
+/// Soft cap on points the lidar point buffer can hold. The shader
+/// soft-truncates writes past this slot via `slot >= max_points`.
+/// Sized for the sticky-spray mode: 2 M points × 32 bytes per entry
+/// (pos + color) = 64 MB. Live (non-sticky) mode only writes
+/// drone_count * rays_per_scan per frame so the cap is overkill there.
+pub const MAX_LIDAR_POINTS: u32 = 2_000_000;
 
 /// Stage 9B output buffer capacity: max number of Occupied-cell instances
 /// the build pass can emit across all drones in a single dispatch. At

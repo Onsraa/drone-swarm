@@ -180,6 +180,10 @@ fn draw_lidar_sliders(ui: &mut egui::Ui, settings: &mut LidarSettings) {
         egui::Slider::new(&mut settings.scan_interval_frames, interval)
             .text("scan every N frames"),
     );
+    ui.checkbox(
+        &mut settings.sticky_spray,
+        "Sticky spray (accumulate hits)",
+    );
 }
 
 fn draw_drone_visibility(

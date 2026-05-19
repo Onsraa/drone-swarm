@@ -17,6 +17,12 @@ pub struct LidarSettings {
     pub cone_half_angle_deg: f32,
     pub max_steps_per_ray: u32,
     pub scan_interval_frames: u32,
+    /// When `true`, the lidar point counter never resets between
+    /// scans. New hits append to the existing buffer until the soft
+    /// cap (`MAX_LIDAR_POINTS`) is reached. Result: a SLAM-style
+    /// accumulated point cloud instead of a pulsing spray. Toggling
+    /// back to `false` naturally clears on the next dispatch.
+    pub sticky_spray: bool,
 }
 
 impl Default for LidarSettings {
@@ -26,6 +32,7 @@ impl Default for LidarSettings {
             cone_half_angle_deg: LIDAR_CONE_HALF_ANGLE_DEGREES,
             max_steps_per_ray: 96,
             scan_interval_frames: 1,
+            sticky_spray: false,
         }
     }
 }
