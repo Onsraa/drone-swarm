@@ -3,14 +3,15 @@ use bevy::prelude::*;
 
 use crate::comms::CommsState;
 use crate::drone::{Drone, DroneId, CRUISE_SPEED_MPS};
+use crate::lidar::gpu::GpuGlobalOccupancyMirror;
 use crate::physics::{DesiredVelocity, LinearVelocity};
 
 use super::components::{FrontierTarget, MovementHealth, Path};
 use super::constants::{
-    FRONTIER_REACHED_DIST, PATH_FOLLOW_LERP_RATE, SCORE_UPGRADE_RATIO,
-    STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS, STUCK_VEL_MPS,
+    AVOID_K_DEFAULT, AVOID_RADIUS_M, FRONTIER_REACHED_DIST, PATH_FOLLOW_LERP_RATE,
+    SCORE_UPGRADE_RATIO, STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS, STUCK_VEL_MPS,
 };
-use super::steering::pure_pursuit;
+use super::steering::{pure_pursuit, reactive_force};
 use super::resources::FrontierClusters;
 use super::scoring::{crowding_for, score, ScoringWeights};
 use rand::RngExt;
@@ -188,4 +189,77 @@ pub fn steer_along_path(
         desired.0 = desired.0.lerp(target_vel, alpha);
     }
 }
-pub fn reactive_avoid() {}
+pub fn reactive_avoid(
+    mirror: Res<GpuGlobalOccupancyMirror>,
+    comms: Res<CommsState>,
+    world: Res<crate::world::WorldConfig>,
+    mut q_self: Query<(&DroneId, &Transform, &mut DesiredVelocity), With<Drone>>,
+    q_peers: Query<(&DroneId, &Transform), With<Drone>>,
+) {
+    if mirror.data.is_empty() {
+        return;
+    }
+    let dims = world.size;
+    let voxel_size = world.voxel_size;
+    let data = &mirror.data;
+    let read = |cell: UVec3| -> u32 {
+        let flat = cell.x + cell.y * dims.x + cell.z * dims.x * dims.y;
+        let w = (flat / 16) as usize;
+        if w >= data.len() {
+            return 0;
+        }
+        let b = (flat % 16) * 2;
+        (data[w] >> b) & 0b11
+    };
+
+    let radius_cells = (AVOID_RADIUS_M / voxel_size).ceil() as i32;
+    let peer_snapshot: Vec<(u32, Vec3)> =
+        q_peers.iter().map(|(id, t)| (id.0, t.translation)).collect();
+
+    for (id, transform, mut desired) in &mut q_self {
+        let pos = transform.translation;
+        let drone_cell = (pos / voxel_size).floor().as_ivec3();
+        let mut hits = Vec::new();
+        for dz in -radius_cells..=radius_cells {
+            for dy in -radius_cells..=radius_cells {
+                for dx in -radius_cells..=radius_cells {
+                    let c = drone_cell + IVec3::new(dx, dy, dz);
+                    if c.x < 0 || c.y < 0 || c.z < 0 {
+                        continue;
+                    }
+                    let u = UVec3::new(c.x as u32, c.y as u32, c.z as u32);
+                    if u.x >= dims.x || u.y >= dims.y || u.z >= dims.z {
+                        continue;
+                    }
+                    let state = read(u);
+                    if state & 0b10 != 0 {
+                        // Occupied cell center in world coords.
+                        let wp = Vec3::new(u.x as f32, u.y as f32, u.z as f32) * voxel_size
+                            + Vec3::splat(voxel_size * 0.5);
+                        hits.push(wp);
+                    }
+                }
+            }
+        }
+        // Filter peer list to comms-connected peers.
+        let half = (id.0 >= 32) as usize;
+        let connected = (comms.connected_mask[half] >> (id.0 % 32)) & 1 == 1;
+        let peers: Vec<Vec3> = if connected {
+            peer_snapshot
+                .iter()
+                .filter(|(pid, _)| {
+                    if *pid == id.0 {
+                        return false;
+                    }
+                    let h = (*pid >= 32) as usize;
+                    (comms.connected_mask[h] >> (pid % 32)) & 1 == 1
+                })
+                .map(|(_, p)| *p)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let force = reactive_force(pos, &hits, &peers, AVOID_K_DEFAULT);
+        desired.0 += force;
+    }
+}
