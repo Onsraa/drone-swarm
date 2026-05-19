@@ -19,7 +19,10 @@ struct LidarParams {
     drone_mask_lo: u32,
     drone_mask_hi: u32,
     max_points: u32,
-    _pad: u32,
+    connected_mask_lo: u32,
+    connected_mask_hi: u32,
+    _pad0: u32,
+    _pad1: u32,
 }
 
 struct DroneScanParams {
@@ -41,6 +44,7 @@ struct DroneScanParams {
 @group(0) @binding(7) var<storage, read_write> point_count: atomic<u32>;
 @group(0) @binding(8) var<storage, read_write> point_buffer: array<vec4<f32>>;
 @group(0) @binding(9) var<storage, read> drone_scan: array<DroneScanParams>;
+@group(0) @binding(10) var<storage, read_write> global_occupancy: array<atomic<u32>>;
 
 fn cell_flat_idx(cell: vec3<i32>) -> u32 {
     return u32(cell.x)
@@ -89,6 +93,10 @@ fn quat_rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
 // Per-drone occupancy is 2 bits per cell, 16 cells per u32.
 //   bit 0 = Free flag, bit 1 = Occupied flag.
 // Both flags are sticky under atomicOr; Unknown = 0b00.
+// Comms-connected drones also mirror their writes into the global
+// occupancy SSBO, replacing the dedicated merge_global pass (which
+// used to OR-fold every drone's full bitset every other frame; doing
+// it inline costs ~640K atomicOr/frame instead of ~30.7M).
 fn mark_cell_state(drone_idx: u32, flat: u32, state_bits: u32) {
     let cells_per_drone = params.dims.x * params.dims.y * params.dims.z;
     let words_per_drone = (cells_per_drone + 15u) / 16u;
@@ -96,6 +104,12 @@ fn mark_cell_state(drone_idx: u32, flat: u32, state_bits: u32) {
     let bit_offset = (flat % 16u) * 2u;
     let mask = state_bits << bit_offset;
     atomicOr(&local_occupancy[word_idx], mask);
+
+    let comms = select(params.connected_mask_lo, params.connected_mask_hi, drone_idx >= 32u);
+    if (((comms >> (drone_idx % 32u)) & 1u) != 0u) {
+        let global_word = flat / 16u;
+        atomicOr(&global_occupancy[global_word], mask);
+    }
 }
 
 fn emit_point(drone_idx: u32, hit_world: vec3<f32>) {

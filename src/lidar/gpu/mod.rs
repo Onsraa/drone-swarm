@@ -1,7 +1,6 @@
 mod build_global_pass;
 mod build_pass;
 mod dispatch;
-mod merge_pass;
 mod per_drone_scan;
 mod pipeline;
 mod resources;
@@ -35,9 +34,6 @@ use build_pass::{
     add_build_local_render_graph_node, init_build_local_pipeline, prepare_build_local_bind_group,
 };
 use dispatch::{add_compute_render_graph_node, prepare_lidar_bind_group};
-use merge_pass::{
-    add_merge_global_render_graph_node, init_merge_global_pipeline, prepare_merge_global_bind_group,
-};
 use pipeline::init_compute_lidar_pipeline;
 use resources::{
     setup_gpu_lidar_assets, BuildLocalParams, LidarParams, MAX_DRONES_GPU, MAX_LIDAR_POINTS,
@@ -120,16 +116,15 @@ impl Plugin for GpuLidarPlugin {
                     init_compute_lidar_pipeline,
                     add_compute_render_graph_node,
                     init_build_local_pipeline,
-                    init_merge_global_pipeline,
                     init_build_global_pipeline,
-                    // Edges: lidar -> {merge_global, build_local}.
-                    //        merge_global -> build_global.
-                    add_merge_global_render_graph_node
-                        .after(add_compute_render_graph_node),
+                    // Edges: lidar -> {build_local, build_global}. The
+                    // old merge_global pass is gone — lidar now writes
+                    // directly into global_occupancy with a comms-mask
+                    // gate, so build_global can run straight after.
                     add_build_local_render_graph_node
                         .after(add_compute_render_graph_node),
                     add_build_global_render_graph_node
-                        .after(add_merge_global_render_graph_node),
+                        .after(add_compute_render_graph_node),
                 ),
             )
             .add_systems(
@@ -139,7 +134,6 @@ impl Plugin for GpuLidarPlugin {
                 // rebuild every frame to point at the live ones.
                 (
                     prepare_lidar_bind_group,
-                    prepare_merge_global_bind_group,
                     prepare_build_local_bind_group,
                     prepare_build_global_bind_group,
                 )
@@ -157,6 +151,7 @@ fn upload_drone_state(
     config: Res<WorldConfig>,
     ui_state: Res<crate::ui::UiState>,
     settings: Res<LidarSettings>,
+    comms: Res<CommsState>,
     drones: Query<(&DroneId, &Transform), With<Drone>>,
 ) {
     let voxel_size = config.voxel_size;
@@ -192,7 +187,10 @@ fn upload_drone_state(
             drone_mask_lo: ui_state.drone_mask[0],
             drone_mask_hi: ui_state.drone_mask[1],
             max_points: MAX_LIDAR_POINTS,
-            _pad: 0,
+            connected_mask_lo: comms.connected_mask[0],
+            connected_mask_hi: comms.connected_mask[1],
+            _pad0: 0,
+            _pad1: 0,
         };
         buf.set_data(params);
     }

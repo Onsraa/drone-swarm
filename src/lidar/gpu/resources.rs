@@ -59,7 +59,10 @@ pub struct LidarParams {
     pub drone_mask_lo: u32,
     pub drone_mask_hi: u32,
     pub max_points: u32,
-    pub _pad: u32,
+    pub connected_mask_lo: u32,
+    pub connected_mask_hi: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
 }
 
 /// Mirrors the WGSL `BuildParams` struct used by `build_local_instances`,
@@ -147,7 +150,10 @@ pub fn setup_gpu_lidar_assets(
         drone_mask_lo: u32::MAX,
         drone_mask_hi: u32::MAX,
         max_points: MAX_LIDAR_POINTS,
-        _pad: 0,
+        connected_mask_lo: u32::MAX,
+        connected_mask_hi: u32::MAX,
+        _pad0: 0,
+        _pad1: 0,
     };
     let mut params_buf = ShaderStorageBuffer::from(params);
     params_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;

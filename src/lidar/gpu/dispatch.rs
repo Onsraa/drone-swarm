@@ -12,9 +12,9 @@ use bevy::render::storage::GpuShaderStorageBuffer;
 use super::per_drone_scan::DroneScanParamsBuffer;
 use super::pipeline::ComputeLidarPipeline;
 use super::resources::{
-    DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer, GroundTruthBuffer,
-    LidarParamsBuffer, LidarPointCountBuffer, LidarPointVecBuffer, LocalOccupancyBuffer,
-    RayDirsBuffer, MAX_DRONES_GPU,
+    DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer, GlobalOccupancyBuffer,
+    GroundTruthBuffer, LidarParamsBuffer, LidarPointCountBuffer, LidarPointVecBuffer,
+    LocalOccupancyBuffer, RayDirsBuffer, MAX_DRONES_GPU,
 };
 use crate::lidar::{LidarFrameCounter, LidarSettings};
 
@@ -37,6 +37,7 @@ pub fn prepare_lidar_bind_group(
     point_count: Option<Res<LidarPointCountBuffer>>,
     point_vec: Option<Res<LidarPointVecBuffer>>,
     scan_params: Option<Res<DroneScanParamsBuffer>>,
+    global_occupancy: Option<Res<GlobalOccupancyBuffer>>,
     buffers: Res<RenderAssets<GpuShaderStorageBuffer>>,
 ) {
     let (
@@ -50,6 +51,7 @@ pub fn prepare_lidar_bind_group(
         Some(point_count),
         Some(point_vec),
         Some(scan_params),
+        Some(global_occupancy),
     ) = (
         ground,
         params,
@@ -61,6 +63,7 @@ pub fn prepare_lidar_bind_group(
         point_count,
         point_vec,
         scan_params,
+        global_occupancy,
     ) else {
         return;
     };
@@ -74,6 +77,7 @@ pub fn prepare_lidar_bind_group(
     let Some(point_count_buf) = buffers.get(&point_count.0) else { return; };
     let Some(point_vec_buf) = buffers.get(&point_vec.0) else { return; };
     let Some(scan_params_buf) = buffers.get(&scan_params.0) else { return; };
+    let Some(global_occupancy_buf) = buffers.get(&global_occupancy.0) else { return; };
 
     let bind_group = render_device.create_bind_group(
         "compute lidar bind group",
@@ -89,6 +93,7 @@ pub fn prepare_lidar_bind_group(
             point_count_buf.buffer.as_entire_buffer_binding(),
             point_vec_buf.buffer.as_entire_buffer_binding(),
             scan_params_buf.buffer.as_entire_buffer_binding(),
+            global_occupancy_buf.buffer.as_entire_buffer_binding(),
         )),
     );
     commands.insert_resource(LidarBindGroup(bind_group));

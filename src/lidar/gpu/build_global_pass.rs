@@ -12,7 +12,7 @@ use bevy::render::render_resource::{
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::storage::GpuShaderStorageBuffer;
 
-use super::merge_pass::MergeGlobalNodeLabel;
+use super::dispatch::ComputeLidarNodeLabel;
 use super::resources::{
     BuildLocalParams, BuildLocalParamsBuffer, GlobalInstanceCountBuffer, GlobalInstanceVecBuffer,
     GlobalOccupancyBuffer,
@@ -157,5 +157,8 @@ impl render_graph::Node for BuildGlobalNode {
 
 pub fn add_build_global_render_graph_node(mut render_graph: ResMut<RenderGraph>) {
     render_graph.add_node(BuildGlobalNodeLabel, BuildGlobalNode);
-    render_graph.add_node_edge(MergeGlobalNodeLabel, BuildGlobalNodeLabel);
+    // lidar -> build_global: lidar writes global_occupancy inline now
+    // (no merge_global pass), so build_global only needs to run after
+    // the lidar compute node.
+    render_graph.add_node_edge(ComputeLidarNodeLabel, BuildGlobalNodeLabel);
 }

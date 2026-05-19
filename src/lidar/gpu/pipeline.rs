@@ -46,6 +46,10 @@ pub fn init_compute_lidar_pipeline(
                 storage_buffer::<Vec<Vec4>>(false),
                 // 9: per-drone scan params (read)
                 storage_buffer_read_only::<Vec<DroneScanParams>>(false),
+                // 10: global occupancy bitset (atomic); lidar writes
+                // here directly (comms-gated) so merge_global is
+                // retired.
+                storage_buffer::<Vec<u32>>(false),
             ),
         ),
     );
