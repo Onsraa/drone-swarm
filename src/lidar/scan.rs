@@ -32,10 +32,12 @@ pub fn lidar_scan(
         .for_each(|(transform, mut local, rays_opt)| {
             let origin_world = transform.translation;
             let origin_grid = origin_world / voxel_size;
+            let rotation = transform.rotation;
             let mut hits: Vec<(Vec3, Vec3)> = Vec::with_capacity(dirs_slice.len());
-            for &dir in dirs_slice {
+            for &local_dir in dirs_slice {
+                let world_dir = rotation * local_dir;
                 let end_cell =
-                    cast_ray(origin_grid, dir, max_grid_steps, ground_ref, &mut local.0);
+                    cast_ray(origin_grid, world_dir, max_grid_steps, ground_ref, &mut local.0);
                 let end_world = (end_cell.as_vec3() + Vec3::splat(0.5)) * voxel_size;
                 hits.push((origin_world, end_world));
             }
