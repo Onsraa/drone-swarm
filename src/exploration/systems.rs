@@ -10,9 +10,8 @@ use crate::physics::{DesiredVelocity, LinearVelocity};
 use super::cluster::build_clusters;
 use super::components::{FrontierTarget, MovementHealth, Path};
 use super::constants::{
-    AVOID_RADIUS_M, FRONTIER_REACHED_DIST, FRONTIER_REFRESH_SECS, PATH_FOLLOW_LERP_RATE,
-    PLANNER_DOWNSAMPLE, SCORE_UPGRADE_RATIO, STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS,
-    STUCK_VEL_MPS,
+    AVOID_RADIUS_M, FRONTIER_REACHED_DIST, PATH_FOLLOW_LERP_RATE, PLANNER_DOWNSAMPLE,
+    SCORE_UPGRADE_RATIO, STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS, STUCK_VEL_MPS,
 };
 
 /// Cap how many A* calls run per frame to amortise the cost of large
@@ -124,79 +123,174 @@ pub fn assign_targets(
     }
 }
 
-pub fn rebuild_planner_grid(
-    time: Res<Time>,
-    mut timer: Local<f32>,
-    mirror: Res<GpuGlobalOccupancyMirror>,
-    world: Res<crate::world::WorldConfig>,
-    mut grid: ResMut<PlannerGrid>,
-) {
-    *timer += time.delta_secs();
-    if *timer < FRONTIER_REFRESH_SECS {
-        return;
-    }
-    *timer = 0.0;
-    if mirror.data.is_empty() {
-        return;
-    }
-    *grid = PlannerGrid::downsample_from_bitset(
-        world.size,
-        world.voxel_size,
-        &mirror.data,
-        PLANNER_DOWNSAMPLE,
-    );
+/// Words processed per frame in the time-sliced 1 Hz scans. At 614K
+/// words for a 640³ map this finishes a full scan in ~20 frames =
+/// ~170 ms at 120 FPS. Below 0.5 ms per frame so the freeze is gone.
+const SCAN_WORDS_PER_FRAME: usize = 32_768;
+
+#[derive(Default)]
+pub struct PlannerScanState {
+    pub snapshot: Vec<u32>,
+    pub dims: UVec3,
+    pub voxel_size: f32,
+    pub occ: Vec<u32>,
+    pub free: Vec<u32>,
+    pub coarse_dims: UVec3,
+    pub word_cursor: usize,
+    pub active: bool,
 }
 
-pub fn compute_frontier_clusters(
-    time: Res<Time>,
-    mut timer: Local<Option<f32>>,
+pub fn rebuild_planner_grid(
     mirror: Res<GpuGlobalOccupancyMirror>,
     world: Res<crate::world::WorldConfig>,
-    mut clusters: ResMut<FrontierClusters>,
+    mut state: Local<PlannerScanState>,
+    mut grid: ResMut<PlannerGrid>,
 ) {
-    // Seed the timer 0.5 s ahead of `rebuild_planner_grid` so the two
-    // 1 Hz CPU scans don't land on the same frame.
-    let t = timer.get_or_insert(0.5);
-    *t += time.delta_secs();
-    if *t < FRONTIER_REFRESH_SECS {
-        return;
-    }
-    *t = 0.0;
     if mirror.data.is_empty() {
         return;
     }
-    let dims = world.size;
-    let total = dims.x * dims.y * dims.z;
-    let data = &mirror.data;
-    let read = |cell: u32| -> u32 {
-        let w = (cell / 16) as usize;
-        if w >= data.len() {
-            return 0;
-        }
-        let b = (cell % 16) * 2;
-        (data[w] >> b) & 0b11
-    };
-    let mut candidates: HashSet<UVec3> = HashSet::new();
-    let plane = dims.x * dims.y;
 
-    // Word-iterate: skip all-zero words. At cold start most of the
-    // bitset is Unknown (= all-zero), so this skips ~99% of the work.
-    for w_idx in 0..data.len() {
-        let word = data[w_idx];
+    // Start a fresh scan when the previous one finished.
+    if !state.active {
+        let dims = world.size;
+        let coarse_dims = UVec3::new(
+            dims.x.div_ceil(PLANNER_DOWNSAMPLE),
+            dims.y.div_ceil(PLANNER_DOWNSAMPLE),
+            dims.z.div_ceil(PLANNER_DOWNSAMPLE),
+        );
+        let total = (coarse_dims.x * coarse_dims.y * coarse_dims.z) as usize;
+        state.snapshot.clone_from(&mirror.data);
+        state.dims = dims;
+        state.voxel_size = world.voxel_size;
+        state.coarse_dims = coarse_dims;
+        state.occ.clear();
+        state.occ.resize(total, 0);
+        state.free.clear();
+        state.free.resize(total, 0);
+        state.word_cursor = 0;
+        state.active = true;
+    }
+
+    let dims = state.dims;
+    let coarse_dims = state.coarse_dims;
+    let plane = dims.x * dims.y;
+    let total_cells = dims.x * dims.y * dims.z;
+    let downsample = PLANNER_DOWNSAMPLE;
+
+    let end = (state.word_cursor + SCAN_WORDS_PER_FRAME).min(state.snapshot.len());
+    for w_idx in state.word_cursor..end {
+        let word = state.snapshot[w_idx];
         if word == 0 {
             continue;
         }
         let base_cell = (w_idx as u32) * 16;
         for slot in 0..16u32 {
-            let state = (word >> (slot * 2)) & 0b11;
-            if state != 0b01 {
+            let cell = base_cell + slot;
+            if cell >= total_cells {
+                break;
+            }
+            let s = (word >> (slot * 2)) & 0b11;
+            if s == 0 {
+                continue;
+            }
+            let z = cell / plane;
+            let rem = cell % plane;
+            let y = rem / dims.x;
+            let x = rem % dims.x;
+            let cx = x / downsample;
+            let cy = y / downsample;
+            let cz = z / downsample;
+            let idx = ((cz * coarse_dims.y + cy) * coarse_dims.x + cx) as usize;
+            if s & 0b10 != 0 {
+                state.occ[idx] += 1;
+            } else if s & 0b01 != 0 {
+                state.free[idx] += 1;
+            }
+        }
+    }
+    state.word_cursor = end;
+
+    if state.word_cursor < state.snapshot.len() {
+        return;
+    }
+
+    // Scan complete — publish the new grid + reset state for the next round.
+    let total = state.occ.len();
+    let coarse: Vec<super::resources::CoarseCell> = (0..total)
+        .map(|i| {
+            if state.occ[i] > state.free[i] {
+                super::resources::CoarseCell::Blocked
+            } else if state.free[i] > state.occ[i] {
+                super::resources::CoarseCell::Free
+            } else {
+                super::resources::CoarseCell::Unknown
+            }
+        })
+        .collect();
+    *grid = PlannerGrid {
+        coarse,
+        dims: coarse_dims,
+        voxel_size: state.voxel_size,
+        downsample,
+    };
+    state.active = false;
+}
+
+#[derive(Default)]
+pub struct ClusterScanState {
+    pub snapshot: Vec<u32>,
+    pub dims: UVec3,
+    pub candidates: HashSet<UVec3>,
+    pub word_cursor: usize,
+    pub active: bool,
+}
+
+pub fn compute_frontier_clusters(
+    mirror: Res<GpuGlobalOccupancyMirror>,
+    world: Res<crate::world::WorldConfig>,
+    mut state: Local<ClusterScanState>,
+    mut clusters: ResMut<FrontierClusters>,
+) {
+    if mirror.data.is_empty() {
+        return;
+    }
+    if !state.active {
+        state.snapshot.clone_from(&mirror.data);
+        state.dims = world.size;
+        state.candidates.clear();
+        state.word_cursor = 0;
+        state.active = true;
+    }
+
+    let dims = state.dims;
+    let total_cells = dims.x * dims.y * dims.z;
+    let plane = dims.x * dims.y;
+    let end = (state.word_cursor + SCAN_WORDS_PER_FRAME).min(state.snapshot.len());
+
+    let read = |snapshot: &[u32], cell: u32| -> u32 {
+        let w = (cell / 16) as usize;
+        if w >= snapshot.len() {
+            return 0;
+        }
+        let b = (cell % 16) * 2;
+        (snapshot[w] >> b) & 0b11
+    };
+
+    for w_idx in state.word_cursor..end {
+        let word = state.snapshot[w_idx];
+        if word == 0 {
+            continue;
+        }
+        let base_cell = (w_idx as u32) * 16;
+        for slot in 0..16u32 {
+            let s = (word >> (slot * 2)) & 0b11;
+            if s != 0b01 {
                 continue;
             }
             let cell = base_cell + slot;
-            if cell >= total {
+            if cell >= total_cells {
                 break;
             }
-            // Free cell — push Unknown 6-neighbours.
             let z = cell / plane;
             let rem = cell % plane;
             let y = rem / dims.x;
@@ -222,13 +316,21 @@ pub fn compute_frontier_clusters(
                     continue;
                 }
                 let nflat = nx as u32 + ny as u32 * dims.x + nz as u32 * plane;
-                if read(nflat) == 0 {
-                    candidates.insert(UVec3::new(nx as u32, ny as u32, nz as u32));
+                if read(&state.snapshot, nflat) == 0 {
+                    state.candidates.insert(UVec3::new(nx as u32, ny as u32, nz as u32));
                 }
             }
         }
     }
-    clusters.entries = build_clusters(&candidates, &mut clusters.next_id);
+    state.word_cursor = end;
+
+    if state.word_cursor < state.snapshot.len() {
+        return;
+    }
+
+    // Scan complete — publish the new cluster list, restart on next tick.
+    clusters.entries = build_clusters(&state.candidates, &mut clusters.next_id);
+    state.active = false;
 }
 
 pub fn replan_paths(

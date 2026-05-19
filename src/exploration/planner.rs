@@ -7,6 +7,12 @@ impl PlannerGrid {
     /// bitset format used by `GpuGlobalOccupancyMirror`: bit 0 = Free
     /// flag, bit 1 = Occupied flag.
     ///
+    /// Production code uses an inlined, time-sliced variant in
+    /// `systems::rebuild_planner_grid` so the scan amortises across
+    /// frames. This single-shot version stays as the spec for the
+    /// downsample semantics + as the test fixture.
+    #[allow(dead_code)]
+    ///
     /// For each coarse cell:
     /// - Count the observed cells (those with Free or Occupied flag set).
     /// - If Occupied > Free, the coarse cell is Blocked.

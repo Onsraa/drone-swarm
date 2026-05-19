@@ -1,5 +1,4 @@
 // Frontier scan + clustering
-pub const FRONTIER_REFRESH_SECS: f32 = 1.0;
 pub const FRONTIER_REACHED_DIST: f32 = 6.0;
 pub const MAX_FRONTIER_CANDIDATES: usize = 50_000;
 pub const MIN_CLUSTER_SIZE: usize = 4;
