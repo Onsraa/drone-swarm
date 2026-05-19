@@ -3,6 +3,7 @@ pub mod components;
 pub mod constants;
 pub mod planner;
 pub mod resources;
+pub mod role;
 pub mod scoring;
 pub mod steering;
 pub mod systems;
@@ -11,6 +12,7 @@ use bevy::prelude::*;
 
 pub use components::{FrontierTarget, MovementHealth, Path};
 pub use resources::{CoarseCell, FrontierCluster, FrontierClusters, PlannerGrid};
+pub use role::{Role, RoleParams};
 pub use systems::ReplanTimer;
 
 use crate::physics::PhysicsSet;
