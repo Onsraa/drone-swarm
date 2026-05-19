@@ -48,13 +48,6 @@ impl VoxelMap {
         Some(x + y * self.dims.x + z * self.dims.x * self.dims.y)
     }
 
-    #[allow(dead_code)]
-    pub fn get(&self, p: IVec3) -> CellState {
-        self.idx(p)
-            .map(|i| self.cells[i as usize])
-            .unwrap_or(CellState::Unknown)
-    }
-
     /// `Occupied` is sticky; `Free` overrides `Unknown` only. Prevents transient
     /// ray-misses from erasing a previously-detected wall.
     pub fn upgrade(&mut self, p: IVec3, observed: CellState) {
