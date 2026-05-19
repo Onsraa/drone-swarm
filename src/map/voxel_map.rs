@@ -16,10 +16,6 @@ pub struct VoxelMap {
     /// FxHash-backed `bevy::platform` HashSet hashes a single integer per
     /// insert/lookup instead of the three i32 fields of `IVec3`.
     known: HashSet<u32>,
-    /// Flat indices of cells that transitioned into `Occupied` since the
-    /// last drain. Lets renderers append-only their instance buffers
-    /// instead of rebuilding from `iter_known()` each frame.
-    dirty_occupied: Vec<u32>,
     free_count: usize,
     occupied_count: usize,
 }
@@ -31,7 +27,6 @@ impl VoxelMap {
             dims,
             cells: vec![CellState::Unknown; n],
             known: HashSet::default(),
-            dirty_occupied: Vec::new(),
             free_count: 0,
             occupied_count: 0,
         }
@@ -70,21 +65,7 @@ impl VoxelMap {
         } else if new_state == CellState::Unknown && cur != CellState::Unknown {
             self.known.remove(&i);
         }
-        if new_state == CellState::Occupied && cur != CellState::Occupied {
-            self.dirty_occupied.push(i);
-        }
         self.cells[idx] = new_state;
-    }
-
-    /// Hands the renderer the flat indices that flipped to `Occupied` since
-    /// the previous call. `Occupied` is sticky so the returned set is purely
-    /// additive — callers can `extend` an instance buffer without removal.
-    pub fn drain_dirty_occupied(&mut self) -> std::vec::Drain<'_, u32> {
-        self.dirty_occupied.drain(..)
-    }
-
-    pub fn has_dirty_occupied(&self) -> bool {
-        !self.dirty_occupied.is_empty()
     }
 
     fn adjust_counts(&mut self, old: CellState, new: CellState) {

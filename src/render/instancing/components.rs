@@ -33,8 +33,4 @@ impl InstancedVoxelLayer {
         self.generation = self.generation.wrapping_add(1);
     }
 
-    /// Append-only. Generation unchanged — uploader streams the tail.
-    pub fn append<I: IntoIterator<Item = InstanceData>>(&mut self, items: I) {
-        self.data.extend(items);
-    }
 }

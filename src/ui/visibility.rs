@@ -1,28 +1,27 @@
 use bevy::prelude::*;
 
-use crate::render::{GlobalMapVoxel, GroundTruthVoxel, LocalMapVoxel};
+use crate::render::{GlobalMapVoxel, GpuLocalMapVoxel, GroundTruthVoxel};
 
 use super::resources::UiState;
 
 /// Run every frame instead of only on `state.is_changed()`. Layer entities
-/// are spawned lazily by `sync_global_map` / `sync_local_maps` *after*
-/// the user may have already set their preferred toggles, so a one-shot
-/// "apply when state changed" missed the freshly-spawned entities and
-/// left them with their default `Visibility::Visible`.
+/// are spawned lazily, so a one-shot "apply when state changed" misses
+/// any freshly-spawned ones and leaves them with their default
+/// `Visibility::Visible`.
 pub fn apply_visibility(
     state: Res<UiState>,
     mut ground_truth_q: Query<
         &mut Visibility,
         (
             With<GroundTruthVoxel>,
-            Without<LocalMapVoxel>,
+            Without<GpuLocalMapVoxel>,
             Without<GlobalMapVoxel>,
         ),
     >,
     mut local_map_q: Query<
         &mut Visibility,
         (
-            With<LocalMapVoxel>,
+            With<GpuLocalMapVoxel>,
             Without<GroundTruthVoxel>,
             Without<GlobalMapVoxel>,
         ),
@@ -32,7 +31,7 @@ pub fn apply_visibility(
         (
             With<GlobalMapVoxel>,
             Without<GroundTruthVoxel>,
-            Without<LocalMapVoxel>,
+            Without<GpuLocalMapVoxel>,
         ),
     >,
 ) {

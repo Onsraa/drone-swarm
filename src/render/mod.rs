@@ -5,12 +5,11 @@ mod global_map;
 mod gpu_local_map;
 mod ground_truth;
 mod instancing;
-mod local_map;
 mod resources;
 
 use bevy::prelude::*;
 
-pub use components::{GlobalMapVoxel, GpuLocalMapVoxel, GroundTruthVoxel, LocalMapVoxel};
+pub use components::{GlobalMapVoxel, GpuLocalMapVoxel, GroundTruthVoxel};
 
 use assets::init_voxel_assets;
 use global_map::sync_global_map;
