@@ -6,6 +6,7 @@ pub mod resources;
 pub mod role;
 pub mod scoring;
 pub mod steering;
+pub mod supervisor;
 pub mod systems;
 
 use bevy::prelude::*;
@@ -13,6 +14,7 @@ use bevy::prelude::*;
 pub use components::{FrontierTarget, MovementHealth, Path};
 pub use resources::{CoarseCell, FrontierCluster, FrontierClusters, PlannerGrid};
 pub use role::{Role, RoleParams};
+pub use supervisor::{LastRoleChange, SupervisorTimer};
 pub use systems::ReplanTimer;
 
 use crate::physics::PhysicsSet;
@@ -27,6 +29,8 @@ impl Plugin for ExplorationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FrontierClusters>()
             .init_resource::<PlannerGrid>()
+            .insert_resource(SupervisorTimer::new())
+            .add_systems(Update, supervisor::supervisor_tick)
             .add_systems(
                 Update,
                 (
