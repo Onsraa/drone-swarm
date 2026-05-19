@@ -103,14 +103,11 @@ fn emit_point(drone_idx: u32, hit_world: vec3<f32>) {
     }
     let base = slot * 2u;
     // Billboard pixel radius for spray points (consumed by
-    // instanced_voxel.wgsl). Slightly larger than the static map so
-    // the live scan still reads as the brightest layer even after
-    // the global palette toned down.
+    // instanced_voxel.wgsl). Larger than the static map so the live
+    // scan reads as the brightest layer.
     let spray_px: f32 = 4.0;
-    let tint = drone_colors[drone_idx];
-    let spray_color = vec4<f32>(tint.rgb, 0.7);
     point_buffer[base] = vec4<f32>(hit_world, spray_px);
-    point_buffer[base + 1u] = spray_color;
+    point_buffer[base + 1u] = drone_colors[drone_idx];
 }
 
 @compute @workgroup_size(8, 8, 1)
