@@ -6,7 +6,7 @@ use crate::map::{unflatten, CellState, LocalMap};
 use crate::world::WorldConfig;
 
 use super::components::LocalMapVoxel;
-use super::constants::{LOCAL_MAP_ALPHA, LOCAL_MAP_COLOR_FACTOR};
+use super::constants::{LOCAL_MAP_ALPHA, LOCAL_MAP_COLOR_FACTOR, LOCAL_MAP_SCALE_FACTOR};
 use super::instancing::{InstanceData, InstancedVoxelLayer};
 use super::resources::CubeMesh;
 
@@ -108,7 +108,7 @@ fn drone_instance_color(color: &DroneColor) -> [f32; 4] {
 fn make_instance(cell: IVec3, voxel_size: f32, half: f32, color: [f32; 4]) -> InstanceData {
     let pos = cell.as_vec3() * voxel_size + Vec3::splat(half);
     InstanceData {
-        pos_scale: [pos.x, pos.y, pos.z, voxel_size],
+        pos_scale: [pos.x, pos.y, pos.z, voxel_size * LOCAL_MAP_SCALE_FACTOR],
         color,
     }
 }

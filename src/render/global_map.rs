@@ -5,7 +5,7 @@ use crate::map::{CellState, GlobalMap};
 use crate::world::WorldConfig;
 
 use super::components::GlobalMapVoxel;
-use super::constants::GLOBAL_OCCUPIED_INSTANCE_COLOR;
+use super::constants::{GLOBAL_MAP_SCALE_FACTOR, GLOBAL_OCCUPIED_INSTANCE_COLOR};
 use super::instancing::{InstanceData, InstancedVoxelLayer};
 use super::resources::CubeMesh;
 
@@ -51,7 +51,7 @@ fn build_instances(global: &GlobalMap, voxel_size: f32) -> Vec<InstanceData> {
             (state == CellState::Occupied).then(|| {
                 let pos = cell.as_vec3() * voxel_size + Vec3::splat(half);
                 InstanceData {
-                    pos_scale: [pos.x, pos.y, pos.z, voxel_size],
+                    pos_scale: [pos.x, pos.y, pos.z, voxel_size * GLOBAL_MAP_SCALE_FACTOR],
                     color: GLOBAL_OCCUPIED_INSTANCE_COLOR,
                 }
             })
