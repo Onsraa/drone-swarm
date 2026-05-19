@@ -29,7 +29,7 @@ pub fn scan_maps_dir(asset_server: Res<AssetServer>, mut registry: ResMut<Availa
         Ok(read) => read
             .filter_map(|e| e.ok())
             .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|n| n.ends_with(".dvm"))
+            .filter(|n| n.ends_with(".dvm") || n.ends_with(".vox"))
             .collect(),
         Err(e) => {
             warn!("failed to read {}: {}", dir.display(), e);

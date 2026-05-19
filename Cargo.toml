@@ -7,4 +7,5 @@ edition = "2024"
 bevy = "0.18.1"
 bevy_egui = "0.39.1"
 bytemuck = { version = "1.25.0", features = ["derive"] }
+dot_vox = "5.2.0"
 rand = "0.10.1"
