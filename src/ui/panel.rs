@@ -2,6 +2,7 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
+use crate::comms::{CommsSettings, CommsState, MAX_COMMS_RANGE_M, MIN_COMMS_RANGE_M};
 use crate::drone::{Drone, DroneColor, DroneId, DroneSpawnConfig, MAX_DRONE_COUNT, MIN_DRONE_COUNT};
 use crate::lidar::{gpu::GpuGlobalStats, LidarSettings};
 use crate::maps::{AvailableMaps, MapSwapRequested};
@@ -18,6 +19,8 @@ pub fn draw_ui(
     mut available: ResMut<AvailableMaps>,
     mut swap_writer: MessageWriter<MapSwapRequested>,
     mut lidar_settings: ResMut<LidarSettings>,
+    mut comms_settings: ResMut<CommsSettings>,
+    comms_state: Res<CommsState>,
     drones_q: Query<(&DroneId, &DroneColor), With<Drone>>,
     gpu_stats: Res<GpuGlobalStats>,
     world: Res<WorldConfig>,
@@ -59,6 +62,9 @@ pub fn draw_ui(
             ui.separator();
 
             draw_lidar_sliders(ui, &mut lidar_settings);
+            ui.separator();
+
+            draw_comms_controls(ui, &mut comms_settings, &comms_state);
             ui.separator();
 
             draw_drone_visibility(ui, &mut state, &drones_q);
@@ -117,6 +123,30 @@ fn draw_map_picker(
                 name: entry.name.clone(),
             });
         }
+    }
+}
+
+fn draw_comms_controls(
+    ui: &mut egui::Ui,
+    settings: &mut CommsSettings,
+    state: &CommsState,
+) {
+    ui.label("Comms");
+    ui.checkbox(&mut settings.enabled, "Gate central map by radio range");
+    ui.add_enabled(
+        settings.enabled,
+        egui::Slider::new(&mut settings.range_m, MIN_COMMS_RANGE_M..=MAX_COMMS_RANGE_M)
+            .text("range (m)"),
+    );
+    ui.add_enabled(
+        settings.enabled,
+        egui::Checkbox::new(&mut settings.show_links, "Draw link gizmos"),
+    );
+    if settings.enabled {
+        ui.label(format!(
+            "Connected: {} / {}",
+            state.connected_count, state.total_count
+        ));
     }
 }
 

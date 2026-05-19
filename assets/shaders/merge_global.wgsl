@@ -12,8 +12,8 @@ struct BuildParams {
     max_instances: u32,
     drone_mask_lo: u32,
     drone_mask_hi: u32,
-    _pad0: u32,
-    _pad1: u32,
+    connected_mask_lo: u32,
+    connected_mask_hi: u32,
 }
 
 @group(0) @binding(0) var<storage, read> local_occupancy: array<u32>;
@@ -31,6 +31,14 @@ fn merge_global(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     var acc: u32 = 0u;
     for (var d: u32 = 0u; d < params.drone_count; d = d + 1u) {
+        // Comms gate: only drones reachable from base contribute to the
+        // merged central map. CPU-side BFS fills connected_mask each
+        // frame; disabled mode leaves it all-ones so every drone
+        // contributes (legacy behavior).
+        let mask = select(params.connected_mask_lo, params.connected_mask_hi, d >= 32u);
+        if (((mask >> (d % 32u)) & 1u) == 0u) {
+            continue;
+        }
         acc |= local_occupancy[d * words_per_drone + w];
     }
     global_occupancy[w] = acc;

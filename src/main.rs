@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
 
 mod camera;
+mod comms;
 mod debug;
 mod drone;
 mod frontier;
@@ -16,6 +17,7 @@ mod ui;
 mod world;
 
 use camera::OrbitCameraPlugin;
+use comms::CommsPlugin;
 use debug::DebugPlugin;
 use drone::DronePlugin;
 use frontier::FrontierPlugin;
@@ -49,6 +51,7 @@ fn main() {
         .add_plugins(LidarPlugin)
         .add_plugins(GpuLidarPlugin)
         .add_plugins(FrontierPlugin)
+        .add_plugins(CommsPlugin)
         .add_plugins(OrbitCameraPlugin)
         .add_plugins(UiPlugin)
         .add_plugins(DebugPlugin)

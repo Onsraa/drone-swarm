@@ -18,6 +18,7 @@ use bevy::render::gpu_readback::{Readback, ReadbackComplete};
 use bevy::render::storage::ShaderStorageBuffer;
 use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 
+use crate::comms::CommsState;
 use crate::drone::{Drone, DroneColor, DroneId};
 use crate::lidar::{LidarFrameCounter, LidarSettings};
 use crate::world::WorldConfig;
@@ -228,12 +229,14 @@ fn upload_ray_dirs(
     *last_settings = Some(*settings);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn upload_build_params_and_colors(
     mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
     colors_handle: Res<DroneColorsBuffer>,
     params_handle: Res<BuildLocalParamsBuffer>,
     config: Res<WorldConfig>,
     ui_state: Res<crate::ui::UiState>,
+    comms: Res<CommsState>,
     drones: Query<(&DroneId, &DroneColor), With<Drone>>,
 ) {
     let mut sorted: Vec<(u32, Vec4)> = drones
@@ -276,8 +279,8 @@ fn upload_build_params_and_colors(
             max_instances: MAX_LOCAL_INSTANCES,
             drone_mask_lo: mask_visual[0],
             drone_mask_hi: mask_visual[1],
-            _pad0: 0,
-            _pad1: 0,
+            connected_mask_lo: comms.connected_mask[0],
+            connected_mask_hi: comms.connected_mask[1],
         };
         buf.set_data(params);
     }

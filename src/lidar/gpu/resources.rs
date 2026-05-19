@@ -70,8 +70,8 @@ pub struct BuildLocalParams {
     pub max_instances: u32,
     pub drone_mask_lo: u32,
     pub drone_mask_hi: u32,
-    pub _pad0: u32,
-    pub _pad1: u32,
+    pub connected_mask_lo: u32,
+    pub connected_mask_hi: u32,
 }
 
 #[derive(Resource, ExtractResource, Clone)]
@@ -196,8 +196,8 @@ pub fn setup_gpu_lidar_assets(
         max_instances: MAX_LOCAL_INSTANCES,
         drone_mask_lo: u32::MAX,
         drone_mask_hi: u32::MAX,
-        _pad0: 0,
-        _pad1: 0,
+        connected_mask_lo: u32::MAX,
+        connected_mask_hi: u32::MAX,
     };
     let mut build_params_buf = ShaderStorageBuffer::from(build_params);
     build_params_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
