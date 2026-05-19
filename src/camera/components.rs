@@ -20,3 +20,13 @@ impl Default for OrbitCamera {
         }
     }
 }
+
+/// Free-fly camera state. `yaw` rotates around world Y, `pitch` around
+/// local X. The combined `Transform.rotation` is rebuilt every frame
+/// from these two values. Movement is WASD + Space/Shift for vertical,
+/// scaled by `FREEFLY_MOVE_SPEED_MPS` and boosted by holding Ctrl.
+#[derive(Component, Default)]
+pub struct FreeFlyCamera {
+    pub yaw: f32,
+    pub pitch: f32,
+}

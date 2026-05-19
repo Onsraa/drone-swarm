@@ -2,6 +2,7 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
+use crate::camera::CameraMode;
 use crate::comms::{CommsSettings, CommsState, MAX_COMMS_RANGE_M, MIN_COMMS_RANGE_M};
 use crate::drone::{Drone, DroneColor, DroneId, DroneSpawnConfig, MAX_DRONE_COUNT, MIN_DRONE_COUNT};
 use crate::lidar::{gpu::GpuGlobalStats, LidarSettings};
@@ -21,6 +22,7 @@ pub fn draw_ui(
     mut lidar_settings: ResMut<LidarSettings>,
     mut comms_settings: ResMut<CommsSettings>,
     comms_state: Res<CommsState>,
+    camera_mode: Res<CameraMode>,
     drones_q: Query<(&DroneId, &DroneColor), With<Drone>>,
     gpu_stats: Res<GpuGlobalStats>,
     world: Res<WorldConfig>,
@@ -85,7 +87,12 @@ pub fn draw_ui(
             ));
             ui.separator();
 
-            ui.label("Drag = orbit. Scroll = zoom.");
+            match *camera_mode {
+                CameraMode::Orbit => ui.label("Orbit cam: LMB drag, scroll zoom. F = free-fly."),
+                CameraMode::FreeFly => {
+                    ui.label("Free-fly: WASD move, Space/Shift up/down, RMB drag look, Ctrl boost. F = orbit.")
+                }
+            };
         });
     Ok(())
 }
