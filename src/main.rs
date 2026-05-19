@@ -8,6 +8,7 @@ mod comms;
 mod debug;
 mod drone;
 mod frontier;
+mod groups;
 mod lidar;
 mod lighting;
 mod maps;
@@ -21,6 +22,7 @@ use comms::CommsPlugin;
 use debug::DebugPlugin;
 use drone::DronePlugin;
 use frontier::FrontierPlugin;
+use groups::DroneGroupPresetsPlugin;
 use lidar::{GpuLidarPlugin, LidarPlugin};
 use lighting::LightingPlugin;
 use maps::MapsPlugin;
@@ -52,6 +54,7 @@ fn main() {
         .add_plugins(GpuLidarPlugin)
         .add_plugins(FrontierPlugin)
         .add_plugins(CommsPlugin)
+        .add_plugins(DroneGroupPresetsPlugin)
         .add_plugins(OrbitCameraPlugin)
         .add_plugins(UiPlugin)
         .add_plugins(DebugPlugin)

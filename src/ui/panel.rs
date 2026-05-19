@@ -5,6 +5,7 @@ use bevy_egui::{egui, EguiContexts};
 use crate::camera::CameraMode;
 use crate::comms::{CommsSettings, CommsState, MAX_COMMS_RANGE_M, MIN_COMMS_RANGE_M};
 use crate::drone::{Drone, DroneColor, DroneId, DroneSpawnConfig, MAX_DRONE_COUNT, MIN_DRONE_COUNT};
+use crate::groups::DroneGroupPresets;
 use crate::lidar::{gpu::GpuGlobalStats, LidarSettings};
 use crate::maps::{AvailableMaps, MapSwapRequested};
 use crate::world::WorldConfig;
@@ -21,6 +22,8 @@ pub fn draw_ui(
     mut swap_writer: MessageWriter<MapSwapRequested>,
     mut lidar_settings: ResMut<LidarSettings>,
     mut comms_settings: ResMut<CommsSettings>,
+    mut presets: ResMut<DroneGroupPresets>,
+    mut preset_name_buf: Local<String>,
     comms_state: Res<CommsState>,
     camera_mode: Res<CameraMode>,
     drones_q: Query<(&DroneId, &DroneColor), With<Drone>>,
@@ -70,6 +73,7 @@ pub fn draw_ui(
             ui.separator();
 
             draw_drone_visibility(ui, &mut state, &drones_q);
+            draw_group_presets(ui, &mut state, &mut presets, &mut preset_name_buf);
             ui.separator();
 
             ui.label("Central map (GPU readback):");
@@ -130,6 +134,54 @@ fn draw_map_picker(
                 name: entry.name.clone(),
             });
         }
+    }
+}
+
+fn draw_group_presets(
+    ui: &mut egui::Ui,
+    state: &mut UiState,
+    presets: &mut DroneGroupPresets,
+    name_buf: &mut String,
+) {
+    ui.label("Presets");
+    ui.horizontal(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(name_buf)
+                .hint_text("preset name")
+                .desired_width(140.0),
+        );
+        let save_enabled = !name_buf.trim().is_empty();
+        if ui
+            .add_enabled(save_enabled, egui::Button::new("Save"))
+            .clicked()
+        {
+            let name = name_buf.trim().to_string();
+            presets.upsert(name, state.drone_mask);
+            name_buf.clear();
+        }
+    });
+
+    let mut to_apply: Option<[u32; 2]> = None;
+    let mut to_delete: Option<usize> = None;
+    for (i, entry) in presets.entries.iter().enumerate() {
+        ui.horizontal(|ui| {
+            if ui
+                .button(&entry.name)
+                .on_hover_text("click to apply this mask")
+                .clicked()
+            {
+                to_apply = Some(entry.mask);
+            }
+            if ui.small_button("x").on_hover_text("delete").clicked() {
+                to_delete = Some(i);
+            }
+        });
+    }
+    if let Some(mask) = to_apply {
+        state.drone_mask = mask;
+    }
+    if let Some(idx) = to_delete {
+        presets.remove(idx);
     }
 }
 
