@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
 use crate::drone::{Drone, DroneColor, DroneId, DroneSpawnConfig, MAX_DRONE_COUNT, MIN_DRONE_COUNT};
-use crate::lidar::gpu::GpuGlobalStats;
+use crate::lidar::{gpu::GpuGlobalStats, LidarSettings};
 use crate::maps::{AvailableMaps, MapSwapRequested};
 use crate::world::WorldConfig;
 
@@ -17,6 +17,7 @@ pub fn draw_ui(
     mut spawn_config: ResMut<DroneSpawnConfig>,
     mut available: ResMut<AvailableMaps>,
     mut swap_writer: MessageWriter<MapSwapRequested>,
+    mut lidar_settings: ResMut<LidarSettings>,
     drones_q: Query<(&DroneId, &DroneColor), With<Drone>>,
     gpu_stats: Res<GpuGlobalStats>,
     world: Res<WorldConfig>,
@@ -55,6 +56,9 @@ pub fn draw_ui(
             );
             let drone_count = drones_q.iter().count();
             ui.label(format!("Drones live: {}", drone_count));
+            ui.separator();
+
+            draw_lidar_sliders(ui, &mut lidar_settings);
             ui.separator();
 
             draw_drone_visibility(ui, &mut state, &drones_q);
@@ -114,6 +118,31 @@ fn draw_map_picker(
             });
         }
     }
+}
+
+fn draw_lidar_sliders(ui: &mut egui::Ui, settings: &mut LidarSettings) {
+    ui.label("Lidar");
+    let rays = LidarSettings::rays_range();
+    let cone = LidarSettings::cone_range();
+    let steps = LidarSettings::steps_range();
+    let interval = LidarSettings::interval_range();
+
+    ui.add(
+        egui::Slider::new(&mut settings.rays_per_scan, rays)
+            .text("rays / scan"),
+    );
+    ui.add(
+        egui::Slider::new(&mut settings.cone_half_angle_deg, cone)
+            .text("cone half-angle (deg)"),
+    );
+    ui.add(
+        egui::Slider::new(&mut settings.max_steps_per_ray, steps)
+            .text("max range (cells)"),
+    );
+    ui.add(
+        egui::Slider::new(&mut settings.scan_interval_frames, interval)
+            .text("scan every N frames"),
+    );
 }
 
 fn draw_drone_visibility(

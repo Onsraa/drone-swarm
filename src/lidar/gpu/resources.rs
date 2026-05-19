@@ -160,11 +160,19 @@ pub fn setup_gpu_lidar_assets(
     orientations_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
     let orientations_handle = buffers.add(orientations_buf);
 
-    let ray_dirs: Vec<Vec4> = ray_dirs_res
-        .0
-        .iter()
-        .map(|d| Vec4::new(d.x, d.y, d.z, 0.0))
-        .collect();
+    // Allocate at the slider's max width so runtime changes to
+    // `LidarSettings.rays_per_scan` never need to reallocate. Initial
+    // contents = the first `RAYS_PER_SCAN` entries from the default
+    // fibonacci cone; trailing slots stay zero until the
+    // `upload_ray_dirs` system rewrites them on a settings change.
+    let mut ray_dirs: Vec<Vec4> =
+        vec![Vec4::ZERO; super::super::constants::MAX_RAYS_PER_SCAN as usize];
+    for (i, dir) in ray_dirs_res.0.iter().enumerate() {
+        if i >= ray_dirs.len() {
+            break;
+        }
+        ray_dirs[i] = Vec4::new(dir.x, dir.y, dir.z, 0.0);
+    }
     let mut dirs_buf = ShaderStorageBuffer::from(ray_dirs);
     dirs_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
     let dirs_handle = buffers.add(dirs_buf);

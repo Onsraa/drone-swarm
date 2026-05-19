@@ -15,7 +15,7 @@ use super::resources::{
     LidarParamsBuffer, LidarPointCountBuffer, LidarPointVecBuffer, LocalOccupancyBuffer,
     RayDirsBuffer, MAX_DRONES_GPU,
 };
-use super::super::constants::RAYS_PER_SCAN;
+use crate::lidar::{LidarFrameCounter, LidarSettings};
 
 #[derive(Resource)]
 pub struct LidarBindGroup(pub BindGroup);
@@ -109,8 +109,24 @@ impl render_graph::Node for ComputeLidarNode {
         let Some(compute_pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) else {
             return Ok(());
         };
-        // Zero the point counter every frame so the point cloud reflects
-        // "this frame's hits" rather than an unbounded ring of history.
+        // Scan rate: only dispatch every `scan_interval_frames` frames.
+        // The point counter is also gated on a real dispatch so the
+        // visible spray sticks for `interval - 1` frames between scans.
+        let settings = world
+            .get_resource::<LidarSettings>()
+            .copied()
+            .unwrap_or_default();
+        let frame = world
+            .get_resource::<LidarFrameCounter>()
+            .map(|c| c.0)
+            .unwrap_or(0);
+        let interval = settings.scan_interval_frames.max(1);
+        if frame % interval != 0 {
+            return Ok(());
+        }
+        // Zero the point counter every active-scan frame so the point
+        // cloud reflects "this scan's hits" rather than an unbounded
+        // ring of history.
         let buffers = world.resource::<RenderAssets<GpuShaderStorageBuffer>>();
         let Some(point_count_handle) = world.get_resource::<LidarPointCountBuffer>() else {
             return Ok(());
@@ -128,7 +144,7 @@ impl render_graph::Node for ComputeLidarNode {
         pass.set_bind_group(0, &bind_group.0, &[]);
         pass.set_pipeline(compute_pipeline);
         let group_x = MAX_DRONES_GPU.div_ceil(8);
-        let group_y = (RAYS_PER_SCAN as u32).div_ceil(8);
+        let group_y = settings.rays_per_scan.max(1).div_ceil(8);
         pass.dispatch_workgroups(group_x, group_y, 1);
         Ok(())
     }

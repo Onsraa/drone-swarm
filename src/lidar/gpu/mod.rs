@@ -19,6 +19,7 @@ use bevy::render::storage::ShaderStorageBuffer;
 use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 
 use crate::drone::{Drone, DroneColor, DroneId};
+use crate::lidar::{LidarFrameCounter, LidarSettings};
 use crate::world::WorldConfig;
 
 use build_global_pass::{
@@ -35,10 +36,10 @@ use merge_pass::{
 use pipeline::init_compute_lidar_pipeline;
 use resources::{
     setup_gpu_lidar_assets, BuildLocalParams, LidarParams, MAX_DRONES_GPU, MAX_LIDAR_POINTS,
-    MAX_LOCAL_INSTANCES, MAX_STEPS_PER_RAY,
+    MAX_LOCAL_INSTANCES,
 };
 
-use super::constants::RAYS_PER_SCAN;
+use super::sampling::fibonacci_cone;
 
 /// CPU-side mirror of the global occupancy counts. Filled in by a
 /// Readback observer over `GlobalOccupancyBuffer`; the side panel reads
@@ -84,6 +85,8 @@ impl Plugin for GpuLidarPlugin {
             .add_plugins(ExtractResourcePlugin::<GlobalInstanceVecBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LidarPointCountBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LidarPointVecBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<LidarSettings>::default())
+            .add_plugins(ExtractResourcePlugin::<LidarFrameCounter>::default())
             .add_systems(
                 Update,
                 (
@@ -93,6 +96,7 @@ impl Plugin for GpuLidarPlugin {
                     upload_drone_state.run_if(resource_exists::<DronePositionsBuffer>),
                     upload_build_params_and_colors
                         .run_if(resource_exists::<BuildLocalParamsBuffer>),
+                    upload_ray_dirs.run_if(resource_exists::<RayDirsBuffer>),
                     spawn_global_stats_readback
                         .run_if(resource_exists::<GlobalOccupancyBuffer>),
                 ),
@@ -136,6 +140,7 @@ impl Plugin for GpuLidarPlugin {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn upload_drone_state(
     mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
     positions_handle: Res<DronePositionsBuffer>,
@@ -143,6 +148,7 @@ fn upload_drone_state(
     params_handle: Res<LidarParamsBuffer>,
     config: Res<WorldConfig>,
     ui_state: Res<crate::ui::UiState>,
+    settings: Res<LidarSettings>,
     drones: Query<(&DroneId, &Transform), With<Drone>>,
 ) {
     let voxel_size = config.voxel_size;
@@ -171,8 +177,8 @@ fn upload_drone_state(
     if let Some(buf) = buffers.get_mut(&params_handle.0) {
         let params = LidarParams {
             dims: UVec4::new(config.size.x, config.size.y, config.size.z, 0),
-            max_steps: MAX_STEPS_PER_RAY,
-            rays_per_scan: RAYS_PER_SCAN as u32,
+            max_steps: settings.max_steps_per_ray,
+            rays_per_scan: settings.rays_per_scan,
             drone_count: count,
             voxel_size: config.voxel_size,
             drone_mask_lo: ui_state.drone_mask[0],
@@ -182,6 +188,44 @@ fn upload_drone_state(
         };
         buf.set_data(params);
     }
+}
+
+/// Rebuild the fibonacci cone whenever `LidarSettings` changes and
+/// stream the new directions into `RayDirsBuffer`. The buffer is
+/// allocated at `MAX_RAYS_PER_SCAN` slots; trailing slots stay zero
+/// when `rays_per_scan` < max. The shader only iterates
+/// `params.rays_per_scan` rays so padding is harmless.
+fn upload_ray_dirs(
+    mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
+    dirs_handle: Res<RayDirsBuffer>,
+    settings: Res<LidarSettings>,
+    mut last_settings: Local<Option<LidarSettings>>,
+) {
+    let needs_update = match *last_settings {
+        None => true,
+        Some(prev) => {
+            prev.rays_per_scan != settings.rays_per_scan
+                || prev.cone_half_angle_deg != settings.cone_half_angle_deg
+        }
+    };
+    if !needs_update {
+        return;
+    }
+
+    let n = settings.rays_per_scan as usize;
+    let dirs = fibonacci_cone(n, settings.cone_half_angle_deg.to_radians());
+    let mut padded: Vec<Vec4> =
+        vec![Vec4::ZERO; super::constants::MAX_RAYS_PER_SCAN as usize];
+    for (i, d) in dirs.iter().enumerate() {
+        if i >= padded.len() {
+            break;
+        }
+        padded[i] = Vec4::new(d.x, d.y, d.z, 0.0);
+    }
+    if let Some(buf) = buffers.get_mut(&dirs_handle.0) {
+        buf.set_data(padded);
+    }
+    *last_settings = Some(*settings);
 }
 
 fn upload_build_params_and_colors(
