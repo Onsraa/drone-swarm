@@ -12,3 +12,9 @@ pub struct GpuLocalMapVoxel;
 /// (global) map instance buffer.
 #[derive(Component)]
 pub struct GpuGlobalMapVoxel;
+
+/// Marker for the per-frame lidar point-spray render entity. The vertex
+/// buffer comes from `LidarPointVecBuffer` and the instance count from
+/// a Readback over `LidarPointCountBuffer`.
+#[derive(Component)]
+pub struct LidarPointVoxel;

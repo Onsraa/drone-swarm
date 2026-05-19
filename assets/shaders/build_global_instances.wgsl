@@ -8,6 +8,10 @@ struct BuildParams {
     voxel_size: f32,
     scale_factor: f32,
     max_instances: u32,
+    drone_mask_lo: u32,
+    drone_mask_hi: u32,
+    _pad0: u32,
+    _pad1: u32,
 }
 
 @group(0) @binding(0) var<storage, read> global_occupancy: array<u32>;

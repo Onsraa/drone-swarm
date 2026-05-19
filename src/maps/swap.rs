@@ -8,9 +8,10 @@ use crate::lidar::gpu::{
     BuildLocalParamsBuffer, DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer,
     GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, GlobalOccupancyBuffer,
     GpuGlobalOccupancyMirror, GpuGlobalStats, GroundTruthBuffer, LidarParamsBuffer,
-    LocalInstanceCountBuffer, LocalInstanceVecBuffer, LocalOccupancyBuffer, RayDirsBuffer,
+    LidarPointCountBuffer, LidarPointVecBuffer, LocalInstanceCountBuffer, LocalInstanceVecBuffer,
+    LocalOccupancyBuffer, RayDirsBuffer,
 };
-use crate::render::{GpuGlobalMapVoxel, GpuLocalMapVoxel, GroundTruthVoxel};
+use crate::render::{GpuGlobalMapVoxel, GpuLocalMapVoxel, GroundTruthVoxel, LidarPointVoxel};
 use crate::world::{GroundTruthMap, WorldConfig};
 
 use super::asset::MapAsset;
@@ -78,6 +79,7 @@ pub fn apply_pending_swap(
     ground_truth_entities: Query<Entity, With<GroundTruthVoxel>>,
     local_map_entities: Query<Entity, With<GpuLocalMapVoxel>>,
     global_map_entities: Query<Entity, With<GpuGlobalMapVoxel>>,
+    point_entities: Query<Entity, With<LidarPointVoxel>>,
     readbacks: Query<Entity, With<Readback>>,
     mut stats: ResMut<GpuGlobalStats>,
     mut mirror: ResMut<GpuGlobalOccupancyMirror>,
@@ -105,6 +107,9 @@ pub fn apply_pending_swap(
     for e in &global_map_entities {
         commands.entity(e).despawn();
     }
+    for e in &point_entities {
+        commands.entity(e).despawn();
+    }
     for e in &readbacks {
         commands.entity(e).despawn();
     }
@@ -122,6 +127,8 @@ pub fn apply_pending_swap(
     commands.remove_resource::<LocalInstanceVecBuffer>();
     commands.remove_resource::<GlobalInstanceCountBuffer>();
     commands.remove_resource::<GlobalInstanceVecBuffer>();
+    commands.remove_resource::<LidarPointCountBuffer>();
+    commands.remove_resource::<LidarPointVecBuffer>();
 
     *stats = GpuGlobalStats::default();
     mirror.data.clear();

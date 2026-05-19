@@ -37,6 +37,12 @@ pub fn init_compute_lidar_pipeline(
                 storage_buffer_read_only::<Vec<Vec4>>(false),
                 // 5: per-drone local-map occupancy (2 bits/cell, atomic)
                 storage_buffer::<Vec<u32>>(false),
+                // 6: drone colors (Vec<Vec4>) for tinting emitted points
+                storage_buffer_read_only::<Vec<Vec4>>(false),
+                // 7: lidar point counter (atomic u32)
+                storage_buffer::<Vec<u32>>(false),
+                // 8: lidar point buffer (Vec<Vec4> pairs: pos_scale + color)
+                storage_buffer::<Vec<Vec4>>(false),
             ),
         ),
     );

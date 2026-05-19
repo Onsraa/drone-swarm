@@ -6,12 +6,10 @@ use bevy::prelude::*;
 use super::asset::MapAsset;
 
 /// One entry per `.dvm` file discovered under `assets/maps/`. `name` is
-/// the bare filename (`clusters.dvm`); `asset_path` is the
-/// AssetServer-relative path (`maps/clusters.dvm`); `handle` is a
-/// pre-loaded handle the UI can drop into a `MapSwapRequested` event.
+/// the bare filename (`clusters.dvm`); `handle` is the pre-loaded
+/// asset handle the UI can drop into a `MapSwapRequested` event.
 pub struct MapEntry {
     pub name: String,
-    pub asset_path: String,
     pub handle: Handle<MapAsset>,
 }
 
@@ -19,12 +17,6 @@ pub struct MapEntry {
 pub struct AvailableMaps {
     pub entries: Vec<MapEntry>,
     pub selected: Option<usize>,
-}
-
-impl AvailableMaps {
-    pub fn selected_entry(&self) -> Option<&MapEntry> {
-        self.selected.and_then(|i| self.entries.get(i))
-    }
 }
 
 /// Scan `assets/maps/*.dvm`, load each one through the AssetServer, and
@@ -51,7 +43,6 @@ pub fn scan_maps_dir(asset_server: Res<AssetServer>, mut registry: ResMut<Availa
         let handle: Handle<MapAsset> = asset_server.load(&asset_path);
         registry.entries.push(MapEntry {
             name: name.clone(),
-            asset_path,
             handle,
         });
     }

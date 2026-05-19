@@ -1,13 +1,13 @@
 use bevy::prelude::*;
 
-use crate::render::{GpuGlobalMapVoxel, GpuLocalMapVoxel, GroundTruthVoxel};
+use crate::render::{GpuGlobalMapVoxel, GpuLocalMapVoxel, GroundTruthVoxel, LidarPointVoxel};
 
 use super::resources::UiState;
 
-/// Run every frame instead of only on `state.is_changed()`. Layer entities
-/// are spawned lazily, so a one-shot "apply when state changed" misses
-/// any freshly-spawned ones and leaves them with their default
-/// `Visibility::Visible`.
+/// Run every frame instead of only on `state.is_changed()`. Layer
+/// entities are spawned lazily (and respawn after a map swap), so a
+/// one-shot "apply when state changed" misses them and leaves them
+/// with default `Visibility::Visible`.
 pub fn apply_visibility(
     state: Res<UiState>,
     mut ground_truth_q: Query<
@@ -16,6 +16,7 @@ pub fn apply_visibility(
             With<GroundTruthVoxel>,
             Without<GpuLocalMapVoxel>,
             Without<GpuGlobalMapVoxel>,
+            Without<LidarPointVoxel>,
         ),
     >,
     mut local_map_q: Query<
@@ -24,6 +25,7 @@ pub fn apply_visibility(
             With<GpuLocalMapVoxel>,
             Without<GroundTruthVoxel>,
             Without<GpuGlobalMapVoxel>,
+            Without<LidarPointVoxel>,
         ),
     >,
     mut global_map_q: Query<
@@ -32,16 +34,23 @@ pub fn apply_visibility(
             With<GpuGlobalMapVoxel>,
             Without<GroundTruthVoxel>,
             Without<GpuLocalMapVoxel>,
+            Without<LidarPointVoxel>,
+        ),
+    >,
+    mut lidar_points_q: Query<
+        &mut Visibility,
+        (
+            With<LidarPointVoxel>,
+            Without<GroundTruthVoxel>,
+            Without<GpuLocalMapVoxel>,
+            Without<GpuGlobalMapVoxel>,
         ),
     >,
 ) {
-    let ground_truth_visibility = to_visibility(state.show_ground_truth);
-    let local_map_visibility = to_visibility(state.show_local_maps);
-    let global_map_visibility = to_visibility(state.show_global_map);
-
-    set_layer(&mut ground_truth_q, ground_truth_visibility);
-    set_layer(&mut local_map_q, local_map_visibility);
-    set_layer(&mut global_map_q, global_map_visibility);
+    set_layer(&mut ground_truth_q, to_visibility(state.show_ground_truth));
+    set_layer(&mut local_map_q, to_visibility(state.show_local_maps));
+    set_layer(&mut global_map_q, to_visibility(state.show_global_map));
+    set_layer(&mut lidar_points_q, to_visibility(state.show_lidar_points));
 }
 
 fn set_layer<F: bevy::ecs::query::QueryFilter>(

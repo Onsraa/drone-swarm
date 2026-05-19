@@ -11,6 +11,11 @@ use super::super::sampling::LidarRayDirs;
 pub const MAX_STEPS_PER_RAY: u32 = 96;
 pub const MAX_DRONES_GPU: u32 = 50;
 
+/// Soft cap on points the lidar compute pass can append in a single
+/// frame. At 50 drones * 64 rays = 3200 max per scan, this leaves
+/// headroom for the future "accumulating" mode (no per-frame reset).
+pub const MAX_LIDAR_POINTS: u32 = 16_384;
+
 /// Stage 9B output buffer capacity: max number of Occupied-cell instances
 /// the build pass can emit across all drones in a single dispatch. At
 /// 640×24×640 with 50 drones, steady-state local-map coverage can hit
@@ -35,16 +40,27 @@ pub fn occupancy_words_per_drone(dims: UVec3) -> usize {
 /// Mirrors the WGSL `LidarParams` struct. Stage 3 uses a stub drone count
 /// of 1 to validate the traversal shader in isolation; Stage 4 replaces
 /// these values with per-tick uploads driven by the real drone query.
+/// `voxel_size` is needed by the lidar shader so it can convert
+/// cell-space hit positions back into world-space points for the
+/// point-cloud render channel.
 #[derive(ShaderType, Clone, Copy, Debug)]
 pub struct LidarParams {
     pub dims: UVec4,
     pub max_steps: u32,
     pub rays_per_scan: u32,
     pub drone_count: u32,
+    pub voxel_size: f32,
+    pub drone_mask_lo: u32,
+    pub drone_mask_hi: u32,
+    pub max_points: u32,
     pub _pad: u32,
 }
 
-/// Mirrors the WGSL `BuildParams` struct used by `build_local_instances`.
+/// Mirrors the WGSL `BuildParams` struct used by `build_local_instances`,
+/// `merge_global`, and `build_global_instances`. All three shaders bind
+/// the same buffer; the mask fields are only consumed by
+/// `build_local_instances` (and any future point-cloud shader). The
+/// trailing `_pad` keeps the struct at a 16-byte boundary in WGSL.
 #[derive(ShaderType, Clone, Copy, Debug)]
 pub struct BuildLocalParams {
     pub dims: UVec4,
@@ -52,6 +68,10 @@ pub struct BuildLocalParams {
     pub voxel_size: f32,
     pub scale_factor: f32,
     pub max_instances: u32,
+    pub drone_mask_lo: u32,
+    pub drone_mask_hi: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
 }
 
 #[derive(Resource, ExtractResource, Clone)]
@@ -93,6 +113,12 @@ pub struct GlobalInstanceCountBuffer(pub Handle<ShaderStorageBuffer>);
 #[derive(Resource, ExtractResource, Clone)]
 pub struct GlobalInstanceVecBuffer(pub Handle<ShaderStorageBuffer>);
 
+#[derive(Resource, ExtractResource, Clone)]
+pub struct LidarPointCountBuffer(pub Handle<ShaderStorageBuffer>);
+
+#[derive(Resource, ExtractResource, Clone)]
+pub struct LidarPointVecBuffer(pub Handle<ShaderStorageBuffer>);
+
 /// One-shot startup: packs the CPU ground truth and allocates every
 /// lidar input/output buffer. Positions and params start zeroed; the
 /// per-frame `upload_drone_positions` system fills them with real data.
@@ -112,6 +138,10 @@ pub fn setup_gpu_lidar_assets(
         max_steps: MAX_STEPS_PER_RAY,
         rays_per_scan: RAYS_PER_SCAN as u32,
         drone_count: 0,
+        voxel_size: 1.0,
+        drone_mask_lo: u32::MAX,
+        drone_mask_hi: u32::MAX,
+        max_points: MAX_LIDAR_POINTS,
         _pad: 0,
     };
     let mut params_buf = ShaderStorageBuffer::from(params);
@@ -156,6 +186,10 @@ pub fn setup_gpu_lidar_assets(
         voxel_size: 1.0,
         scale_factor: 1.0,
         max_instances: MAX_LOCAL_INSTANCES,
+        drone_mask_lo: u32::MAX,
+        drone_mask_hi: u32::MAX,
+        _pad0: 0,
+        _pad1: 0,
     };
     let mut build_params_buf = ShaderStorageBuffer::from(build_params);
     build_params_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
@@ -189,6 +223,16 @@ pub fn setup_gpu_lidar_assets(
         BufferUsages::COPY_SRC | BufferUsages::COPY_DST | BufferUsages::VERTEX;
     let global_instance_vec_handle = buffers.add(global_instance_vec_buf);
 
+    let mut point_count_buf = ShaderStorageBuffer::from(vec![0u32; 1]);
+    point_count_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let point_count_handle = buffers.add(point_count_buf);
+
+    let point_vec_len = (MAX_LIDAR_POINTS as usize) * 2;
+    let mut point_vec_buf = ShaderStorageBuffer::from(vec![Vec4::ZERO; point_vec_len]);
+    point_vec_buf.buffer_description.usage |=
+        BufferUsages::COPY_SRC | BufferUsages::COPY_DST | BufferUsages::VERTEX;
+    let point_vec_handle = buffers.add(point_vec_buf);
+
     info!(
         "GPU lidar buffers allocated: {} drone slots, {} rays/scan, {} steps/ray, {} occupancy u32s ({} words/drone)",
         MAX_DRONES_GPU,
@@ -211,4 +255,6 @@ pub fn setup_gpu_lidar_assets(
     commands.insert_resource(LocalInstanceVecBuffer(instance_vec_handle));
     commands.insert_resource(GlobalInstanceCountBuffer(global_count_handle));
     commands.insert_resource(GlobalInstanceVecBuffer(global_instance_vec_handle));
+    commands.insert_resource(LidarPointCountBuffer(point_count_handle));
+    commands.insert_resource(LidarPointVecBuffer(point_vec_handle));
 }

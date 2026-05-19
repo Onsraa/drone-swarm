@@ -11,14 +11,16 @@ use bevy::render::storage::GpuShaderStorageBuffer;
 
 use super::pipeline::ComputeLidarPipeline;
 use super::resources::{
-    DroneOrientationsBuffer, DronePositionsBuffer, GroundTruthBuffer, LidarParamsBuffer,
-    LocalOccupancyBuffer, RayDirsBuffer, MAX_DRONES_GPU,
+    DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer, GroundTruthBuffer,
+    LidarParamsBuffer, LidarPointCountBuffer, LidarPointVecBuffer, LocalOccupancyBuffer,
+    RayDirsBuffer, MAX_DRONES_GPU,
 };
 use super::super::constants::RAYS_PER_SCAN;
 
 #[derive(Resource)]
 pub struct LidarBindGroup(pub BindGroup);
 
+#[allow(clippy::too_many_arguments)]
 pub fn prepare_lidar_bind_group(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
@@ -30,11 +32,32 @@ pub fn prepare_lidar_bind_group(
     orientations: Option<Res<DroneOrientationsBuffer>>,
     dirs: Option<Res<RayDirsBuffer>>,
     occupancy: Option<Res<LocalOccupancyBuffer>>,
+    colors: Option<Res<DroneColorsBuffer>>,
+    point_count: Option<Res<LidarPointCountBuffer>>,
+    point_vec: Option<Res<LidarPointVecBuffer>>,
     buffers: Res<RenderAssets<GpuShaderStorageBuffer>>,
 ) {
-    let (Some(ground), Some(params), Some(positions), Some(orientations), Some(dirs), Some(occupancy)) =
-        (ground, params, positions, orientations, dirs, occupancy)
-    else {
+    let (
+        Some(ground),
+        Some(params),
+        Some(positions),
+        Some(orientations),
+        Some(dirs),
+        Some(occupancy),
+        Some(colors),
+        Some(point_count),
+        Some(point_vec),
+    ) = (
+        ground,
+        params,
+        positions,
+        orientations,
+        dirs,
+        occupancy,
+        colors,
+        point_count,
+        point_vec,
+    ) else {
         return;
     };
     let Some(ground_buf) = buffers.get(&ground.0) else { return; };
@@ -43,6 +66,9 @@ pub fn prepare_lidar_bind_group(
     let Some(orientations_buf) = buffers.get(&orientations.0) else { return; };
     let Some(dirs_buf) = buffers.get(&dirs.0) else { return; };
     let Some(occupancy_buf) = buffers.get(&occupancy.0) else { return; };
+    let Some(colors_buf) = buffers.get(&colors.0) else { return; };
+    let Some(point_count_buf) = buffers.get(&point_count.0) else { return; };
+    let Some(point_vec_buf) = buffers.get(&point_vec.0) else { return; };
 
     let bind_group = render_device.create_bind_group(
         "compute lidar bind group",
@@ -54,6 +80,9 @@ pub fn prepare_lidar_bind_group(
             dirs_buf.buffer.as_entire_buffer_binding(),
             orientations_buf.buffer.as_entire_buffer_binding(),
             occupancy_buf.buffer.as_entire_buffer_binding(),
+            colors_buf.buffer.as_entire_buffer_binding(),
+            point_count_buf.buffer.as_entire_buffer_binding(),
+            point_vec_buf.buffer.as_entire_buffer_binding(),
         )),
     );
     commands.insert_resource(LidarBindGroup(bind_group));
@@ -80,8 +109,18 @@ impl render_graph::Node for ComputeLidarNode {
         let Some(compute_pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) else {
             return Ok(());
         };
+        // Zero the point counter every frame so the point cloud reflects
+        // "this frame's hits" rather than an unbounded ring of history.
+        let buffers = world.resource::<RenderAssets<GpuShaderStorageBuffer>>();
+        let Some(point_count_handle) = world.get_resource::<LidarPointCountBuffer>() else {
+            return Ok(());
+        };
+        let Some(point_count_buf) = buffers.get(&point_count_handle.0) else {
+            return Ok(());
+        };
 
         let encoder = render_context.command_encoder();
+        encoder.clear_buffer(&point_count_buf.buffer, 0, None);
         let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
             label: Some("compute lidar pass"),
             ..default()

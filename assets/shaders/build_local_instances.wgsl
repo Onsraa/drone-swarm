@@ -13,6 +13,10 @@ struct BuildParams {
     voxel_size: f32,
     scale_factor: f32,
     max_instances: u32,
+    drone_mask_lo: u32,
+    drone_mask_hi: u32,
+    _pad0: u32,
+    _pad1: u32,
 }
 
 @group(0) @binding(0) var<storage, read> local_occupancy: array<u32>;
@@ -27,6 +31,13 @@ fn build(@builtin(global_invocation_id) gid: vec3<u32>) {
     let drone_idx = gid.y;
     let cells_per_drone = params.dims.x * params.dims.y * params.dims.z;
     if (cell_flat >= cells_per_drone || drone_idx >= params.drone_count) {
+        return;
+    }
+
+    // Per-drone visibility mask: bit `drone_idx` of the 64-bit mask must
+    // be set, else this drone contributes no instances on this frame.
+    let mask_word = select(params.drone_mask_lo, params.drone_mask_hi, drone_idx >= 32u);
+    if (((mask_word >> (drone_idx % 32u)) & 1u) == 0u) {
         return;
     }
 

@@ -8,8 +8,8 @@ mod resources;
 pub use resources::{
     BuildLocalParamsBuffer, DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer,
     GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, GlobalOccupancyBuffer, GroundTruthBuffer,
-    LidarParamsBuffer, LocalInstanceCountBuffer, LocalInstanceVecBuffer, LocalOccupancyBuffer,
-    RayDirsBuffer,
+    LidarParamsBuffer, LidarPointCountBuffer, LidarPointVecBuffer, LocalInstanceCountBuffer,
+    LocalInstanceVecBuffer, LocalOccupancyBuffer, RayDirsBuffer,
 };
 
 use bevy::prelude::*;
@@ -34,8 +34,8 @@ use merge_pass::{
 };
 use pipeline::init_compute_lidar_pipeline;
 use resources::{
-    setup_gpu_lidar_assets, BuildLocalParams, LidarParams, MAX_DRONES_GPU, MAX_LOCAL_INSTANCES,
-    MAX_STEPS_PER_RAY,
+    setup_gpu_lidar_assets, BuildLocalParams, LidarParams, MAX_DRONES_GPU, MAX_LIDAR_POINTS,
+    MAX_LOCAL_INSTANCES, MAX_STEPS_PER_RAY,
 };
 
 use super::constants::RAYS_PER_SCAN;
@@ -82,6 +82,8 @@ impl Plugin for GpuLidarPlugin {
             .add_plugins(ExtractResourcePlugin::<LocalInstanceVecBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<GlobalInstanceCountBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<GlobalInstanceVecBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<LidarPointCountBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<LidarPointVecBuffer>::default())
             .add_systems(
                 Update,
                 (
@@ -140,6 +142,7 @@ fn upload_drone_state(
     orientations_handle: Res<DroneOrientationsBuffer>,
     params_handle: Res<LidarParamsBuffer>,
     config: Res<WorldConfig>,
+    ui_state: Res<crate::ui::UiState>,
     drones: Query<(&DroneId, &Transform), With<Drone>>,
 ) {
     let voxel_size = config.voxel_size;
@@ -171,6 +174,10 @@ fn upload_drone_state(
             max_steps: MAX_STEPS_PER_RAY,
             rays_per_scan: RAYS_PER_SCAN as u32,
             drone_count: count,
+            voxel_size: config.voxel_size,
+            drone_mask_lo: ui_state.drone_mask[0],
+            drone_mask_hi: ui_state.drone_mask[1],
+            max_points: MAX_LIDAR_POINTS,
             _pad: 0,
         };
         buf.set_data(params);
@@ -182,6 +189,7 @@ fn upload_build_params_and_colors(
     colors_handle: Res<DroneColorsBuffer>,
     params_handle: Res<BuildLocalParamsBuffer>,
     config: Res<WorldConfig>,
+    ui_state: Res<crate::ui::UiState>,
     drones: Query<(&DroneId, &DroneColor), With<Drone>>,
 ) {
     let mut sorted: Vec<(u32, Vec4)> = drones
@@ -211,12 +219,21 @@ fn upload_build_params_and_colors(
         buf.set_data(colors);
     }
     if let Some(buf) = buffers.get_mut(&params_handle.0) {
+        let mask_visual = if ui_state.show_local_maps {
+            ui_state.drone_mask
+        } else {
+            [0, 0]
+        };
         let params = BuildLocalParams {
             dims: UVec4::new(config.size.x, config.size.y, config.size.z, 0),
             drone_count: count,
             voxel_size: config.voxel_size,
             scale_factor: crate::render::constants::LOCAL_MAP_SCALE_FACTOR,
             max_instances: MAX_LOCAL_INSTANCES,
+            drone_mask_lo: mask_visual[0],
+            drone_mask_hi: mask_visual[1],
+            _pad0: 0,
+            _pad1: 0,
         };
         buf.set_data(params);
     }
