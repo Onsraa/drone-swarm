@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy::render::gpu_readback::Readback;
 
 use crate::drone::Drone;
-use crate::frontier::{FrontierCandidates, FrontierTarget};
+use crate::exploration::{FrontierClusters, FrontierTarget};
 use crate::lidar::gpu::{
     BuildLocalParamsBuffer, DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer,
     GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, GlobalOccupancyBuffer,
@@ -83,7 +83,7 @@ pub fn apply_pending_swap(
     readbacks: Query<Entity, With<Readback>>,
     mut stats: ResMut<GpuGlobalStats>,
     mut mirror: ResMut<GpuGlobalOccupancyMirror>,
-    mut frontier: ResMut<FrontierCandidates>,
+    mut clusters: ResMut<FrontierClusters>,
     mut frontier_targets: Query<&mut FrontierTarget>,
 ) {
     let Some(handle) = pending.handle.clone() else {
@@ -132,9 +132,11 @@ pub fn apply_pending_swap(
 
     *stats = GpuGlobalStats::default();
     mirror.data.clear();
-    frontier.cells.clear();
+    clusters.entries.clear();
+    clusters.next_id = 0;
     for mut t in &mut frontier_targets {
-        t.0 = None;
+        t.pos = None;
+        t.cluster_id = None;
     }
 
     let map = GroundTruthMap::from_bitset(asset.dims, &asset.bitset);
