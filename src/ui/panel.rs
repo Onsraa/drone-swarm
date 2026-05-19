@@ -3,7 +3,9 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
 use crate::drone::{Drone, DroneSpawnConfig, MAX_DRONE_COUNT, MIN_DRONE_COUNT};
+use crate::lidar::gpu::GpuGlobalStats;
 use crate::map::{GlobalMap, LocalMap};
+use crate::world::WorldConfig;
 
 use super::constants::SIDE_PANEL_DEFAULT_WIDTH;
 use super::resources::UiState;
@@ -13,7 +15,9 @@ pub fn draw_ui(
     mut state: ResMut<UiState>,
     mut spawn_config: ResMut<DroneSpawnConfig>,
     drones_q: Query<&LocalMap, With<Drone>>,
-    global_map: Option<Res<GlobalMap>>,
+    _global_map: Option<Res<GlobalMap>>,
+    gpu_stats: Res<GpuGlobalStats>,
+    world: Res<WorldConfig>,
     diagnostics: Res<DiagnosticsStore>,
 ) -> Result {
     let fps = diagnostics
@@ -63,18 +67,19 @@ pub fn draw_ui(
             }
             ui.separator();
 
-            ui.label("Central map:");
-            if let Some(global) = global_map.as_ref() {
-                let (free, occupied) = global.0.count_known();
-                let total = (global.0.dims.x * global.0.dims.y * global.0.dims.z) as usize;
-                let coverage_pct = (free + occupied) as f32 / total as f32 * 100.0;
-                ui.label(format!(
-                    "  free {} | occ {} | / {} ({:.1}% known)",
-                    free, occupied, total, coverage_pct
-                ));
+            ui.label("Central map (GPU readback):");
+            let total = (world.size.x * world.size.y * world.size.z) as usize;
+            let free = gpu_stats.free;
+            let occupied = gpu_stats.occupied;
+            let coverage_pct = if total > 0 {
+                (free + occupied) as f32 / total as f32 * 100.0
             } else {
-                ui.label("  (not yet initialized)");
-            }
+                0.0
+            };
+            ui.label(format!(
+                "  free {} | occ {} | / {} ({:.1}% known)",
+                free, occupied, total, coverage_pct
+            ));
             ui.separator();
 
             ui.label("Drag = orbit. Scroll = zoom.");

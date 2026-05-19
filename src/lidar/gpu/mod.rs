@@ -36,10 +36,22 @@ use merge_pass::{
 use pipeline::init_compute_lidar_pipeline;
 use resources::{
     setup_gpu_lidar_assets, BuildLocalParams, BuildLocalParamsBuffer, DroneColorsBuffer,
-    DroneOrientationsBuffer, DronePositionsBuffer, GlobalOccupancyBuffer, GroundTruthBuffer,
-    LidarHitsBuffer, LidarParams, LidarParamsBuffer, LocalOccupancyBuffer, PendingLidarHits,
-    RayDirsBuffer, MAX_DRONES_GPU, MAX_LOCAL_INSTANCES, MAX_STEPS_PER_RAY,
+    DroneOrientationsBuffer, DronePositionsBuffer, GroundTruthBuffer, LidarHitsBuffer, LidarParams,
+    LidarParamsBuffer, LocalOccupancyBuffer, PendingLidarHits, RayDirsBuffer, MAX_DRONES_GPU,
+    MAX_LOCAL_INSTANCES, MAX_STEPS_PER_RAY,
 };
+
+pub use resources::GlobalOccupancyBuffer;
+
+/// CPU-side mirror of the global occupancy counts. Filled in by a
+/// Readback observer over `GlobalOccupancyBuffer`; the side panel reads
+/// it to display central-map coverage without touching the CPU
+/// `GlobalMap`.
+#[derive(Resource, Default, Clone, Copy, Debug)]
+pub struct GpuGlobalStats {
+    pub free: usize,
+    pub occupied: usize,
+}
 
 use super::constants::RAYS_PER_SCAN;
 
@@ -53,6 +65,7 @@ pub struct GpuLidarPlugin;
 impl Plugin for GpuLidarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PendingLidarHits>()
+            .init_resource::<GpuGlobalStats>()
             .add_plugins(ExtractResourcePlugin::<GroundTruthBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LidarParamsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<DronePositionsBuffer>::default())
@@ -79,6 +92,8 @@ impl Plugin for GpuLidarPlugin {
                     upload_build_params_and_colors
                         .run_if(resource_exists::<BuildLocalParamsBuffer>),
                     apply_lidar_hits.after(upload_drone_state),
+                    spawn_global_stats_readback
+                        .run_if(resource_exists::<GlobalOccupancyBuffer>),
                 ),
             );
 
@@ -234,6 +249,44 @@ fn upload_build_params_and_colors(
         };
         buf.set_data(params);
     }
+}
+
+/// Stage 9Ec: one Readback over the global occupancy SSBO, counting
+/// Free/Occupied 2-bit slots into `GpuGlobalStats`. The panel reads
+/// the resource; this is the last CPU consumer of global voxel state.
+fn spawn_global_stats_readback(
+    mut commands: Commands,
+    occupancy: Option<Res<GlobalOccupancyBuffer>>,
+    mut spawned: Local<bool>,
+) {
+    if *spawned {
+        return;
+    }
+    let Some(occupancy) = occupancy else {
+        return;
+    };
+    *spawned = true;
+    commands
+        .spawn(Readback::buffer(occupancy.0.clone()))
+        .observe(
+            |event: On<ReadbackComplete>, mut stats: ResMut<GpuGlobalStats>| {
+                let data: Vec<u32> = event.to_shader_type();
+                let mut free = 0usize;
+                let mut occupied = 0usize;
+                for &word in &data {
+                    for slot in 0..16u32 {
+                        let state = (word >> (slot * 2)) & 0b11;
+                        match state {
+                            1 => free += 1,
+                            2 | 3 => occupied += 1,
+                            _ => {}
+                        }
+                    }
+                }
+                stats.free = free;
+                stats.occupied = occupied;
+            },
+        );
 }
 
 /// Drain the latest GPU hits, fold each cell into the drone's `LocalMap`
