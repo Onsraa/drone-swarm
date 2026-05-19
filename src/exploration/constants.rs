@@ -9,7 +9,6 @@ pub const PLANNER_DOWNSAMPLE: u32 = 8;
 pub const PLANNER_FREE_COST: f32 = 1.0;
 pub const PLANNER_UNKNOWN_COST_MULT: f32 = 3.0;
 pub const PLANNER_DEEP_UNKNOWN_MULT: f32 = 5.0;
-pub const REPLAN_MIN_INTERVAL_SECS: f32 = 1.0;
 
 // Steering
 pub const PATH_FOLLOW_LERP_RATE: f32 = 3.0;

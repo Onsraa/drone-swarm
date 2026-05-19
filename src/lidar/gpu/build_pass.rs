@@ -130,6 +130,17 @@ impl render_graph::Node for BuildLocalNode {
         let Some(compute_pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) else {
             return Ok(());
         };
+        // Halve the build cost by running every other frame. Output is
+        // a vertex buffer the render reads each frame — a one-frame
+        // staleness is invisible. Skips ~245 M thread invocations
+        // every other frame at 50 drones × 9.83 M cells.
+        let frame = world
+            .get_resource::<crate::lidar::LidarFrameCounter>()
+            .map(|c| c.0)
+            .unwrap_or(0);
+        if frame % 2 != 0 {
+            return Ok(());
+        }
         // Use the default world dims directly to avoid needing
         // WorldConfig in the render world. The shader bounds-checks
         // `cell_flat >= cells_per_drone`, so a fixed-size dispatch is

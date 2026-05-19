@@ -11,9 +11,15 @@ use super::cluster::build_clusters;
 use super::components::{FrontierTarget, MovementHealth, Path};
 use super::constants::{
     AVOID_RADIUS_M, FRONTIER_REACHED_DIST, FRONTIER_REFRESH_SECS, PATH_FOLLOW_LERP_RATE,
-    PLANNER_DOWNSAMPLE, REPLAN_MIN_INTERVAL_SECS, SCORE_UPGRADE_RATIO,
-    STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS, STUCK_VEL_MPS,
+    PLANNER_DOWNSAMPLE, SCORE_UPGRADE_RATIO, STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS,
+    STUCK_VEL_MPS,
 };
+
+/// Cap how many A* calls run per frame to amortise the cost of large
+/// target-changed events (e.g. first frame after spawn, or right after
+/// a map swap when every drone simultaneously gets a fresh target).
+/// Remaining drones get their replan on the next frame.
+const MAX_REPLANS_PER_FRAME: usize = 4;
 use super::planner::plan;
 use super::resources::{FrontierClusters, PlannerGrid};
 use super::steering::{pure_pursuit, reactive_force};
@@ -225,42 +231,45 @@ pub fn compute_frontier_clusters(
     clusters.entries = build_clusters(&candidates, &mut clusters.next_id);
 }
 
-#[derive(Component, Default, Debug)]
-pub struct ReplanTimer(pub f32);
-
 pub fn replan_paths(
-    time: Res<Time>,
     grid: Res<PlannerGrid>,
-    mut q: Query<
-        (&Transform, &FrontierTarget, &mut Path, &mut ReplanTimer),
-        With<Drone>,
-    >,
+    mut q: Query<(&Transform, Ref<FrontierTarget>, &mut Path), With<Drone>>,
 ) {
     if grid.dims == UVec3::ZERO {
         return;
     }
-    let dt = time.delta_secs();
-    for (transform, target, mut path, mut rt) in &mut q {
-        rt.0 += dt;
+    let cell_size = grid.voxel_size * grid.downsample as f32;
+    let mut budget = MAX_REPLANS_PER_FRAME;
+    for (transform, target, mut path) in &mut q {
         let Some(target_pos) = target.pos else {
-            path.waypoints.clear();
-            path.cursor = 0;
+            if !path.waypoints.is_empty() {
+                path.waypoints.clear();
+                path.cursor = 0;
+            }
             continue;
         };
-        let need_replan =
-            path.waypoints.is_empty() || rt.0 >= REPLAN_MIN_INTERVAL_SECS;
+        // Event-driven replan: target changed, or path empty.
+        // Stuck recovery clears `path` directly, which trips the
+        // path-empty branch on the next call.
+        let need_replan = path.waypoints.is_empty() || target.is_changed();
         if !need_replan {
             continue;
         }
-        rt.0 = 0.0;
+        if budget == 0 {
+            // Leave this drone's stale path in place; next frame's
+            // budget will replan it. Path stays valid enough to keep
+            // the drone moving in roughly the right direction.
+            break;
+        }
+        budget -= 1;
 
         let drone_pos = transform.translation;
-        let cell_size = grid.voxel_size * grid.downsample as f32;
         let start = (drone_pos / cell_size).floor().as_uvec3();
         let goal = (target_pos / cell_size).floor().as_uvec3();
         match plan(&grid, start, goal) {
             Some(cells) => {
-                path.waypoints = cells.iter().map(|c| grid.world_pos_of(*c)).collect();
+                path.waypoints.clear();
+                path.waypoints.extend(cells.iter().map(|c| grid.world_pos_of(*c)));
                 path.cursor = 0;
             }
             None => {

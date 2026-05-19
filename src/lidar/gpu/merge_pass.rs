@@ -116,6 +116,17 @@ impl render_graph::Node for MergeGlobalNode {
         let Some(compute_pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) else {
             return Ok(());
         };
+        // Same every-2-frames gate as the build passes. Per-drone
+        // occupancy is sticky, so the merged global only changes when
+        // new bits land — running this at 30 Hz instead of 60 Hz saves
+        // ~15 M atomicOr per second (50 drones × 614 K words × 0.5).
+        let frame = world
+            .get_resource::<crate::lidar::LidarFrameCounter>()
+            .map(|c| c.0)
+            .unwrap_or(0);
+        if frame % 2 != 0 {
+            return Ok(());
+        }
 
         // Same world-size assumption as the build pass: shader bounds-
         // checks `w >= words_per_drone`, so the dispatch grid can be

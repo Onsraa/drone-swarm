@@ -125,6 +125,16 @@ impl render_graph::Node for BuildGlobalNode {
         let Some(compute_pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) else {
             return Ok(());
         };
+        // Same every-2-frames gate as BuildLocalNode. Render reads the
+        // central-map instance buffer every frame; a one-frame stale
+        // build is invisible.
+        let frame = world
+            .get_resource::<crate::lidar::LidarFrameCounter>()
+            .map(|c| c.0)
+            .unwrap_or(0);
+        if frame % 2 != 0 {
+            return Ok(());
+        }
 
         let dims = crate::world::WorldConfig::default().size;
         let cells_per_drone = dims.x * dims.y * dims.z;

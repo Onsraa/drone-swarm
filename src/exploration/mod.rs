@@ -15,7 +15,6 @@ pub use components::{FrontierTarget, MovementHealth, Path};
 pub use resources::{FrontierClusters, PlannerGrid};
 pub use role::{Role, RoleParams};
 pub use supervisor::{LastRoleChange, SupervisorTimer};
-pub use systems::ReplanTimer;
 
 use crate::physics::PhysicsSet;
 use systems::{
