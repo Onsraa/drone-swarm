@@ -61,9 +61,7 @@ Modest gain on its own (12 KB vs 98 KB). Worth doing once #9 puts per-drone maps
 
 ## Known paper cuts
 
-- `bevy_gltf` warns about `Unknown vertex attribute TEXCOORD_2..9` from `drone.glb`. Harmless; trim the asset in Blender or filter the log.
-- If the user toggles ground-truth on while local maps are also on, the two layers occupy the same cells. The cyan blend reads OK but Z-fighting can appear. Small per-layer scale offset (1.0 / 1.01 / 1.02) would fix.
-- `VoxelMap::get` currently carries `#[allow(dead_code)]`; remove the allow once a caller materializes.
+(none open — all three previous items shipped)
 
 ## Critical files
 
