@@ -22,8 +22,3 @@ pub struct InstancedVoxelLayer {
     pub generation: u32,
 }
 
-impl InstancedVoxelLayer {
-    pub fn new(data: Vec<InstanceData>) -> Self {
-        Self { data, generation: 1 }
-    }
-}
