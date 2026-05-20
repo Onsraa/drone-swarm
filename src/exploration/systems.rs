@@ -475,24 +475,43 @@ pub fn stuck_recovery(
 }
 pub fn steer_along_path(
     time: Res<Time>,
-    mut q: Query<(&Transform, &Role, &mut Path, &mut DesiredVelocity), With<Drone>>,
+    mut q: Query<
+        (
+            &Transform,
+            &Role,
+            &mut Path,
+            &FrontierTarget,
+            &mut DesiredVelocity,
+        ),
+        With<Drone>,
+    >,
 ) {
     let dt = time.delta_secs();
-    for (transform, role, mut path, mut desired) in &mut q {
+    for (transform, role, mut path, frontier, mut desired) in &mut q {
         let cruise = RoleParams::for_role(*role).cruise_speed_mps;
         if cruise <= 0.0 {
-            // Anchors don't move via the planner.
+            // Anchors don't move via the planner. `anchor_seek` handles
+            // their motion separately.
             continue;
         }
-        let Some(waypoint) = pure_pursuit(&mut path, transform.translation) else {
-            continue;
+        let pos = transform.translation;
+        // Prefer the A* waypoint when one exists; otherwise fall back
+        // to a straight-line vector toward `frontier.pos` so the drone
+        // doesn't sit drifting for the 1-13 frames it takes the replan
+        // budget to compute its path.
+        let goal = match pure_pursuit(&mut path, pos) {
+            Some(wp) => wp,
+            None => match frontier.pos {
+                Some(p) => p,
+                None => continue,
+            },
         };
-        let to_wp = waypoint - transform.translation;
-        let dist = to_wp.length();
+        let to_goal = goal - pos;
+        let dist = to_goal.length();
         if dist < 1e-3 {
             continue;
         }
-        let target_vel = (to_wp / dist) * cruise;
+        let target_vel = (to_goal / dist) * cruise;
         let alpha = (PATH_FOLLOW_LERP_RATE * dt).min(1.0);
         desired.0 = desired.0.lerp(target_vel, alpha);
     }

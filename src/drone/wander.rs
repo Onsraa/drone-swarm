@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
+use crate::exploration::{FrontierTarget, Path};
 use crate::physics::DesiredVelocity;
 
 use super::components::{Drone, WanderTarget, WanderTimer};
@@ -10,15 +11,32 @@ use super::constants::{
 use super::spawn::random_unit_dir;
 
 /// Pick a fresh wander target each interval and smoothly lerp the drone's
-/// `DesiredVelocity` toward it. The physics controller does the rest.
+/// `DesiredVelocity` toward it. Only fires when the drone has neither a
+/// `FrontierTarget` nor a populated `Path` — wander is a cold-start /
+/// fully-isolated fallback, not a constant noise source competing with
+/// the steering pipeline.
 pub fn wander(
     time: Res<Time>,
-    mut q: Query<(&mut WanderTimer, &mut WanderTarget, &mut DesiredVelocity), With<Drone>>,
+    mut q: Query<
+        (
+            &mut WanderTimer,
+            &mut WanderTarget,
+            &mut DesiredVelocity,
+            &FrontierTarget,
+            &Path,
+        ),
+        With<Drone>,
+    >,
 ) {
     let mut rng = rand::rng();
     let dt = time.delta_secs();
 
-    for (mut timer, mut target, mut desired) in &mut q {
+    for (mut timer, mut target, mut desired, frontier, path) in &mut q {
+        if frontier.pos.is_some() || !path.waypoints.is_empty() {
+            // Drone has a real goal. Don't inject random noise on top
+            // of the steering signal; the steer system owns DesiredVelocity.
+            continue;
+        }
         timer.0.tick(time.delta());
         if timer.0.just_finished() {
             target.0 = random_target_velocity(&mut rng);
