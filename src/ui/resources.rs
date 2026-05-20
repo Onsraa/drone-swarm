@@ -13,9 +13,17 @@ pub struct UiState {
     /// plus the A* waypoint polyline ahead.
     pub show_paths: bool,
     /// Per-drone raycast gizmo lines showing the role's sensor shape
-    /// (scout cone, mapper sphere, anchor hemisphere) cast against
-    /// ground truth.
+    /// (legacy name — kept for migration). New code uses the two
+    /// fields below.
+    #[allow(dead_code)]
     pub show_raycast_lines: bool,
+    /// Short-range grey collision-probe rays, per role's detector set.
+    pub show_detector_rays: bool,
+    /// Role-tinted mapping lidar cone (longer range). Anchors draw
+    /// nothing because their `rays_per_scan = 0`.
+    pub show_lidar_rays: bool,
+    /// Subsampled pheromone-field heatmap as billboard squares.
+    pub show_pheromone_field: bool,
     /// 64-bit visibility mask, bit `i` = drone id `i` rendered in the
     /// local-map layer. `[lo, hi]` halves match the WGSL pair on the
     /// build-shader side. Default all-ones (every drone visible).
@@ -57,10 +65,13 @@ impl Default for UiState {
             show_ground_truth: false,
             show_local_maps: true,
             show_global_map: true,
-            show_lidar_points: true,
+            show_lidar_points: false,
             show_trails: true,
             show_paths: false,
-            show_raycast_lines: true,
+            show_raycast_lines: false,
+            show_detector_rays: true,
+            show_lidar_rays: true,
+            show_pheromone_field: true,
             drone_mask: [u32::MAX, u32::MAX],
         }
     }

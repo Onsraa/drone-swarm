@@ -86,7 +86,12 @@ impl RoleParams {
                 cruise_speed_mps: 0.0,
                 cone_half_angle_deg: 180.0,
                 max_range_cells: 128,
-                rays_per_scan: 64,
+                // Anchor doesn't map. `rays_per_scan = 0` makes the
+                // lidar compute shader iterate zero times for this
+                // role, so anchor's local + central occupancy
+                // contributions are nil. Visually: no lidar rays on
+                // anchors.
+                rays_per_scan: 0,
                 scan_interval_frames: 3,
                 info_weight: 0.0,
                 distance_weight: 0.0,

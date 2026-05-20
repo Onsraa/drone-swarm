@@ -7,6 +7,7 @@ mod gpu_lidar_points;
 mod gpu_local_map;
 mod ground_truth;
 mod instancing;
+mod pheromone_render;
 mod raycast_viz;
 mod resources;
 
@@ -21,6 +22,7 @@ use gpu_lidar_points::GpuLidarPointsPlugin;
 use gpu_local_map::GpuLocalMapPlugin;
 use ground_truth::spawn_ground_truth_layer;
 use instancing::InstancedVoxelPlugin;
+use pheromone_render::PheromoneRenderPlugin;
 use raycast_viz::RaycastVizPlugin;
 
 pub struct VoxelRenderPlugin;
@@ -33,6 +35,7 @@ impl Plugin for VoxelRenderPlugin {
             .add_plugins(GpuGlobalMapPlugin)
             .add_plugins(GpuLidarPointsPlugin)
             .add_plugins(RaycastVizPlugin)
+            .add_plugins(PheromoneRenderPlugin)
             .add_systems(Startup, init_voxel_assets)
             .add_systems(Update, spawn_ground_truth_layer);
     }

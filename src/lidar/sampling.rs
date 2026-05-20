@@ -2,6 +2,12 @@ use bevy::prelude::*;
 
 use crate::exploration::{Role, RoleParams};
 
+/// Scout's lidar cone is tilted slightly nose-down ("like a dog
+/// sniffing"). Rotation applied to each ray at build time so the GPU
+/// shader doesn't need to know. Around +X, negative angle rotates -Z
+/// (body forward) toward -Y (down).
+pub const SCOUT_LIDAR_TILT_DOWN_RAD: f32 = -0.175; // ≈ -10°
+
 #[derive(Clone, Copy, Debug)]
 pub struct RoleConeRange {
     pub role: Role,
@@ -23,10 +29,17 @@ pub fn build_role_ray_buffer() -> (Vec<Vec3>, [RoleConeRange; 3]) {
     let mut offset = 0u32;
     for (i, role) in roles.iter().enumerate() {
         let params = RoleParams::for_role(*role);
-        let dirs = fibonacci_cone(
+        let mut dirs = fibonacci_cone(
             params.rays_per_scan as usize,
             params.cone_half_angle_deg.to_radians(),
         );
+        // Scout-only: tilt the whole cone down by SCOUT_LIDAR_TILT_DOWN_RAD.
+        if matches!(*role, Role::Scout) {
+            let tilt = Quat::from_rotation_x(SCOUT_LIDAR_TILT_DOWN_RAD);
+            for d in dirs.iter_mut() {
+                *d = (tilt * *d).normalize_or_zero();
+            }
+        }
         let count = dirs.len() as u32;
         ranges[i] = RoleConeRange {
             role: *role,

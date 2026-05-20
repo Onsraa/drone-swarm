@@ -55,8 +55,10 @@ pub fn draw_ui(
             ui.checkbox(&mut state.show_ground_truth, "Show ground truth (debug)");
             ui.checkbox(&mut state.show_local_maps, "Show drone local maps");
             ui.checkbox(&mut state.show_global_map, "Show central map");
-            ui.checkbox(&mut state.show_lidar_points, "Show lidar spray (points)");
-            ui.checkbox(&mut state.show_raycast_lines, "Show raycast lines (per role)");
+            ui.checkbox(&mut state.show_lidar_points, "Show lidar spray (GPU points)");
+            ui.checkbox(&mut state.show_detector_rays, "Show detector rays (grey)");
+            ui.checkbox(&mut state.show_lidar_rays, "Show lidar rays (role-tinted)");
+            ui.checkbox(&mut state.show_pheromone_field, "Show pheromone field");
             ui.checkbox(&mut state.show_trails, "Show drone trails");
             ui.checkbox(&mut state.show_paths, "Show drone paths + targets");
             ui.separator();

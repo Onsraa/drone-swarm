@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 mod centering;
 mod components;
 mod constants;
@@ -12,23 +13,18 @@ pub use components::{Drone, DroneColor, DroneId};
 pub use constants::{MAX_DRONE_COUNT, MIN_DRONE_COUNT};
 pub use resources::DroneSpawnConfig;
 
-use centering::recenter_visuals;
-use spawn::{respawn_drones_if_needed, sync_color_to_role};
+use spawn::{init_drone_body_assets, respawn_drones_if_needed, sync_color_to_role};
 
 pub struct DronePlugin;
 
 impl Plugin for DronePlugin {
     fn build(&self, app: &mut App) {
-        // `wander` is no longer scheduled. `apply_role_steering` in
-        // `ExplorationPlugin` owns `DesiredVelocity` for every drone
-        // now (per-role pheromone-gradient + separation + terrain
-        // repulsion). Wander module is kept around as dead code for
-        // one or two more commits in case we want to revive a
-        // cold-start fallback; Phase 6 of the foraging-colony plan
-        // deletes it.
-        app.init_resource::<DroneSpawnConfig>().add_systems(
-            Update,
-            (respawn_drones_if_needed, recenter_visuals, sync_color_to_role),
-        );
+        // Body mesh + per-role materials get built once at startup.
+        // `respawn_drones_if_needed` waits for that resource before
+        // spawning any drones. GLB pipeline retired in this commit —
+        // drones are now flat role-tinted cuboids.
+        app.init_resource::<DroneSpawnConfig>()
+            .add_systems(Startup, init_drone_body_assets)
+            .add_systems(Update, (respawn_drones_if_needed, sync_color_to_role));
     }
 }

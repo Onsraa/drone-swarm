@@ -1,6 +1,5 @@
 use std::f32::consts::TAU;
 
-use bevy::gltf::GltfAssetLabel;
 use bevy::prelude::*;
 use rand::{Rng, RngExt};
 
@@ -10,29 +9,64 @@ use crate::exploration::{
 use crate::physics::{DesiredVelocity, LinearVelocity, PrevLinvel};
 use crate::world::WorldConfig;
 
-use super::components::{Drone, DroneColor, DroneId, PendingCenter, WanderTarget, WanderTimer};
+use super::components::{Drone, DroneColor, DroneId, WanderTarget, WanderTimer};
 use super::constants::{
-    DRONE_GLB_PATH, DRONE_SCALE, DRONE_SPAWN_RADIUS_METERS, MODEL_YAW_OFFSET_RADIANS,
-    RANDOM_DIR_MIN_LENGTH, WANDER_CHANGE_INTERVAL_SECS,
+    DRONE_SPAWN_RADIUS_METERS, RANDOM_DIR_MIN_LENGTH, WANDER_CHANGE_INTERVAL_SECS,
 };
-use super::resources::DroneSpawnConfig;
+use super::resources::{DroneBodyAssets, DroneSpawnConfig};
 
 /// Each frame, if the drone count doesn't match `DroneSpawnConfig.target_count`,
 /// despawn all current drones and respawn fresh ones. Cube cleanup of each
 /// drone's local-map cubes is handled by the render module via removal
 /// events, so this system only needs to manage drone entities themselves.
+/// One-shot startup: builds the shared drone body mesh (a flat
+/// rectangular cuboid) + three per-role `StandardMaterial`s and parks
+/// them in `DroneBodyAssets`. Roles tint the body via material;
+/// `sync_color_to_role` swaps the handle when supervisor changes a
+/// drone's role mid-sim.
+pub fn init_drone_body_assets(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let mesh = meshes.add(Cuboid::new(1.2, 0.4, 1.2));
+    let make_mat = |role: Role, materials: &mut Assets<StandardMaterial>| {
+        let tint = RoleParams::for_role(role).tint;
+        materials.add(StandardMaterial {
+            base_color: Color::linear_rgba(tint[0], tint[1], tint[2], 1.0),
+            metallic: 0.15,
+            perceptual_roughness: 0.55,
+            ..default()
+        })
+    };
+    let scout_material = make_mat(Role::Scout, &mut materials);
+    let mapper_material = make_mat(Role::Mapper, &mut materials);
+    let anchor_material = make_mat(Role::Anchor, &mut materials);
+    commands.insert_resource(DroneBodyAssets {
+        mesh,
+        scout_material,
+        mapper_material,
+        anchor_material,
+    });
+}
+
 pub fn respawn_drones_if_needed(
     mut commands: Commands,
     spawn_config: Res<DroneSpawnConfig>,
     world: Res<WorldConfig>,
     map: Option<Res<crate::world::GroundTruthMap>>,
-    asset_server: Res<AssetServer>,
+    body_assets: Option<Res<DroneBodyAssets>>,
     drones_q: Query<Entity, With<Drone>>,
 ) {
     let current_count = drones_q.iter().count() as u32;
     if current_count == spawn_config.target_count {
         return;
     }
+    let Some(body_assets) = body_assets else {
+        // Startup ordering: body assets may not be ready on frame 1.
+        // The respawn check runs again next tick.
+        return;
+    };
     for entity in &drones_q {
         commands.entity(entity).despawn();
     }
@@ -49,7 +83,7 @@ pub fn respawn_drones_if_needed(
         let role = role_for_index(id, target);
         let tint = RoleParams::for_role(role).tint;
         let color = Color::linear_rgba(tint[0], tint[1], tint[2], tint[3]);
-        spawn_one_drone(&mut commands, &asset_server, id, spawn_pos, color, role);
+        spawn_one_drone(&mut commands, &body_assets, id, spawn_pos, color, role);
     }
     info!(
         "respawned drones: {} -> {}",
@@ -59,7 +93,7 @@ pub fn respawn_drones_if_needed(
 
 fn spawn_one_drone(
     commands: &mut Commands,
-    asset_server: &AssetServer,
+    body: &DroneBodyAssets,
     id: u32,
     spawn_pos: Vec3,
     color: Color,
@@ -86,16 +120,11 @@ fn spawn_one_drone(
             Path::default(),
             Trail::default(),
             LastRoleChange::default(),
-            Transform::from_translation(spawn_pos).with_scale(Vec3::splat(DRONE_SCALE)),
+            Transform::from_translation(spawn_pos),
             Visibility::default(),
-        ))
-        .with_children(|parent| {
-            parent.spawn((
-                SceneRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(DRONE_GLB_PATH))),
-                Transform::from_rotation(Quat::from_rotation_y(MODEL_YAW_OFFSET_RADIANS)),
-                PendingCenter,
-            ));
-        });
+            Mesh3d(body.mesh.clone()),
+            MeshMaterial3d(body.material_for(role)),
+        ));
 }
 
 /// When the supervisor reassigns a drone's role (e.g. promotes a Scout
@@ -104,11 +133,17 @@ fn spawn_one_drone(
 /// palette. Driven by `Changed<Role>` so it only fires on actual
 /// transitions, not every frame.
 pub fn sync_color_to_role(
-    mut q: Query<(&Role, &mut DroneColor), (With<Drone>, Changed<Role>)>,
+    body_assets: Option<Res<DroneBodyAssets>>,
+    mut q: Query<
+        (&Role, &mut DroneColor, &mut MeshMaterial3d<StandardMaterial>),
+        (With<Drone>, Changed<Role>),
+    >,
 ) {
-    for (role, mut color) in &mut q {
+    let Some(body_assets) = body_assets else { return; };
+    for (role, mut color, mut mat) in &mut q {
         let tint = RoleParams::for_role(*role).tint;
         color.0 = Color::linear_rgba(tint[0], tint[1], tint[2], tint[3]);
+        mat.0 = body_assets.material_for(*role);
     }
 }
 
