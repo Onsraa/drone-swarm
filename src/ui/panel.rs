@@ -199,22 +199,32 @@ fn draw_comms_controls(
     settings: &mut CommsSettings,
     state: &CommsState,
 ) {
-    ui.label("Comms");
-    ui.checkbox(&mut settings.enabled, "Gate central map by radio range");
+    ui.label("Knowledge propagation");
+    ui.checkbox(
+        &mut settings.enabled,
+        "Require chain-to-base for central map",
+    );
     ui.add_enabled(
         settings.enabled,
         egui::Slider::new(&mut settings.range_m, MIN_COMMS_RANGE_M..=MAX_COMMS_RANGE_M)
-            .text("range (m)"),
+            .text("comms range (m)"),
     );
     ui.add_enabled(
         settings.enabled,
-        egui::Checkbox::new(&mut settings.show_links, "Draw link gizmos"),
+        egui::Checkbox::new(&mut settings.show_links, "Draw comms graph"),
     );
     if settings.enabled {
+        let disconnected = state.total_count.saturating_sub(state.connected_count);
         ui.label(format!(
-            "Connected: {} / {}",
-            state.connected_count, state.total_count
+            "  in-chain: {} / {}   stranded: {}",
+            state.connected_count, state.total_count, disconnected,
         ));
+        if disconnected > 0 {
+            ui.colored_label(
+                egui::Color32::from_rgb(220, 160, 90),
+                "  ⚠ some drones holding data offline",
+            );
+        }
     }
 }
 

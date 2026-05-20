@@ -13,7 +13,12 @@ pub struct CommsSettings {
 impl Default for CommsSettings {
     fn default() -> Self {
         Self {
-            enabled: false,
+            // Knowledge-to-central gating is core to the simulation
+            // narrative (drones can only contribute to the central map
+            // when physically chain-connected back to the base), so
+            // this defaults ON. The slider still allows toggling for
+            // A/B testing.
+            enabled: true,
             range_m: DEFAULT_COMMS_RANGE_M,
             show_links: true,
         }
