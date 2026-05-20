@@ -4,6 +4,7 @@ use bevy::prelude::*;
 
 use crate::exploration::{GhostMemory, LastRoleChange, Role, RoleParams, Trail};
 use crate::physics::{DesiredVelocity, LinearVelocity, PrevLinvel};
+use crate::sensors::DetectorHits;
 use crate::world::WorldConfig;
 
 use super::components::{Drone, DroneColor, DroneId};
@@ -104,6 +105,7 @@ fn spawn_one_drone(
         PrevLinvel::default(),
         Trail::default(),
         GhostMemory::default(),
+        DetectorHits::default(),
         LastRoleChange::default(),
         Transform::from_translation(spawn_pos),
         Visibility::default(),

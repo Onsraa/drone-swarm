@@ -9,12 +9,12 @@ use bevy::prelude::*;
 
 use crate::comms::CommsState;
 use crate::drone::{Drone, DroneColor, DroneId};
-use crate::lidar::gpu::GpuGlobalOccupancyMirror;
 use crate::pheromone::PheromoneField;
 use crate::physics::DesiredVelocity;
+use crate::sensors::DetectorHits;
 
 use super::components::{GhostMemory, GhostPeer, Trail};
-use super::constants::{AVOID_RADIUS_M, TRAIL_MAX_POINTS, TRAIL_SAMPLE_INTERVAL_SECS};
+use super::constants::{TRAIL_MAX_POINTS, TRAIL_SAMPLE_INTERVAL_SECS};
 use super::role::{peer_repulsion_for, Role, RoleParams};
 use super::steering::{reactive_force, reactive_force_peers};
 
@@ -77,12 +77,18 @@ pub fn draw_trail_gizmos(
 pub fn apply_role_steering(
     time: Res<Time>,
     pheromone: Res<PheromoneField>,
-    mirror: Res<GpuGlobalOccupancyMirror>,
     world: Res<crate::world::WorldConfig>,
     comms_state: Res<CommsState>,
     comms_settings: Res<crate::comms::CommsSettings>,
     mut q_self: Query<
-        (&DroneId, &Transform, &Role, &mut DesiredVelocity, &mut GhostMemory),
+        (
+            &DroneId,
+            &Transform,
+            &Role,
+            &mut DesiredVelocity,
+            &mut GhostMemory,
+            &DetectorHits,
+        ),
         With<Drone>,
     >,
     q_peers: Query<(&DroneId, &Transform, &Role), With<Drone>>,
@@ -95,22 +101,16 @@ pub fn apply_role_steering(
     let now = time.elapsed_secs();
     let comms_range = comms_settings.range_m;
     let central_pos = comms_state.base_pos;
-
-    let data = &mirror.data;
-    let dims = world.size;
-    let voxel_size = world.voxel_size;
     let world_center = world.center();
-    let radius_cells = (AVOID_RADIUS_M / voxel_size).ceil() as i32;
 
-    for (id, transform, role, mut desired, mut ghost) in &mut q_self {
+    for (id, transform, role, mut desired, mut ghost, detector) in &mut q_self {
         let pos = transform.translation;
         let cruise = RoleParams::for_role(*role).cruise_speed_mps;
         let avoid_k = RoleParams::for_role(*role).avoid_k;
 
         // Peer separation — pair-wise stiffness. Scouts barely brake
         // for Mappers (k = 1) but Mappers actively yield to Scouts
-        // (k = 28). Anchors don't move at all from peer forces. See
-        // `peer_repulsion_for` in `role.rs`.
+        // (k = 28). Anchors don't react to peer forces.
         peers_buf.clear();
         for (pid, p, peer_role) in peer_snap.iter() {
             if *pid == id.0 {
@@ -123,37 +123,13 @@ pub fn apply_role_steering(
         }
         let separation = reactive_force_peers(pos, &peers_buf);
 
-        // Terrain repulsion from lidar hits in a small cube around
-        // the drone. Reads the global occupancy mirror (CPU copy of
-        // the GPU bitset). Skips when the mirror hasn't populated yet.
+        // Terrain repulsion from THIS drone's detector ray hits —
+        // same rays the grey gizmo viz draws. What you see is what
+        // pushes the drone. Misses (`is_hit = false`) get skipped.
         hits_buf.clear();
-        if !data.is_empty() {
-            let drone_cell = (pos / voxel_size).floor().as_ivec3();
-            for dz in -radius_cells..=radius_cells {
-                for dy in -radius_cells..=radius_cells {
-                    for dx in -radius_cells..=radius_cells {
-                        let c = drone_cell + IVec3::new(dx, dy, dz);
-                        if c.x < 0 || c.y < 0 || c.z < 0 {
-                            continue;
-                        }
-                        let u = UVec3::new(c.x as u32, c.y as u32, c.z as u32);
-                        if u.x >= dims.x || u.y >= dims.y || u.z >= dims.z {
-                            continue;
-                        }
-                        let flat = u.x + u.y * dims.x + u.z * dims.x * dims.y;
-                        let w = (flat / 16) as usize;
-                        if w >= data.len() {
-                            continue;
-                        }
-                        let b = (flat % 16) * 2;
-                        let state = (data[w] >> b) & 0b11;
-                        if state & 0b10 != 0 {
-                            let wp = Vec3::new(u.x as f32, u.y as f32, u.z as f32) * voxel_size
-                                + Vec3::splat(voxel_size * 0.5);
-                            hits_buf.push(wp);
-                        }
-                    }
-                }
+        for (i, ep) in detector.endpoints.iter().enumerate() {
+            if detector.is_hit.get(i).copied().unwrap_or(false) {
+                hits_buf.push(*ep);
             }
         }
         let terrain = reactive_force(pos, &hits_buf, &[], avoid_k);

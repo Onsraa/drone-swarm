@@ -15,6 +15,7 @@ mod maps;
 mod pheromone;
 mod physics;
 mod render;
+mod sensors;
 mod ui;
 mod world;
 
@@ -30,6 +31,7 @@ use maps::MapsPlugin;
 use pheromone::PheromonePlugin;
 use physics::PhysicsPlugin;
 use render::VoxelRenderPlugin;
+use sensors::SensorsPlugin;
 use ui::UiPlugin;
 use world::WorldPlugin;
 
@@ -55,6 +57,7 @@ fn main() {
         .add_plugins(LidarPlugin)
         .add_plugins(GpuLidarPlugin)
         .add_plugins(PheromonePlugin)
+        .add_plugins(SensorsPlugin)
         .add_plugins(ExplorationPlugin)
         .add_plugins(CommsPlugin)
         .add_plugins(DroneGroupPresetsPlugin)
