@@ -91,6 +91,20 @@ fn spawn_one_drone(
         });
 }
 
+/// When the supervisor reassigns a drone's role (e.g. promotes a Scout
+/// to Anchor at a comms articulation point), re-tint the `DroneColor`
+/// so the local + global maps + drone model all flip to the new role's
+/// palette. Driven by `Changed<Role>` so it only fires on actual
+/// transitions, not every frame.
+pub fn sync_color_to_role(
+    mut q: Query<(&Role, &mut DroneColor), (With<Drone>, Changed<Role>)>,
+) {
+    for (role, mut color) in &mut q {
+        let tint = RoleParams::for_role(*role).tint;
+        color.0 = Color::linear_rgba(tint[0], tint[1], tint[2], tint[3]);
+    }
+}
+
 /// Stagger N drones around the world center on a horizontal ring of
 /// `DRONE_SPAWN_RADIUS_METERS`. With N = 1 the drone lands at center.
 fn ring_position(center: Vec3, id: u32, count: u32) -> Vec3 {

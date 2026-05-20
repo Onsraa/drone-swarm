@@ -15,7 +15,7 @@ pub use wander::wander;
 use crate::physics::PhysicsSet;
 
 use centering::recenter_visuals;
-use spawn::respawn_drones_if_needed;
+use spawn::{respawn_drones_if_needed, sync_color_to_role};
 
 pub struct DronePlugin;
 
@@ -26,6 +26,7 @@ impl Plugin for DronePlugin {
             (
                 respawn_drones_if_needed,
                 recenter_visuals,
+                sync_color_to_role,
                 wander.before(PhysicsSet::Control),
             ),
         );
