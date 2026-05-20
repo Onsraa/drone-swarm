@@ -2,18 +2,34 @@ use super::components::Path;
 use super::constants::{AVOID_RADIUS_M, AVOID_RADIUS_PEER_M};
 use bevy::prelude::*;
 
+/// Distance under which a waypoint is considered "reached" and the
+/// cursor advances unconditionally. Without this, `pure_pursuit` will
+/// sit at a waypoint that's slightly closer than the next one, even
+/// when the drone is essentially AT the waypoint — particularly
+/// `waypoints[0]`, which equals the drone's position at the moment the
+/// path was planned. Drone wobbles in place around the start waypoint,
+/// never advancing.
+const WAYPOINT_REACHED_M: f32 = 2.0;
+
 /// Pure-pursuit waypoint selection. Advances the path cursor past any
-/// waypoints the drone has passed, then returns the current cursor waypoint
-/// as the steering target. Returns `None` for empty paths.
+/// waypoints the drone has reached or passed, then returns the current
+/// cursor waypoint as the steering target. Returns `None` for empty
+/// paths.
 pub fn pure_pursuit(path: &mut Path, drone_pos: Vec3) -> Option<Vec3> {
     if path.waypoints.is_empty() {
         return None;
     }
-    // Advance cursor past waypoints that are now behind the drone.
-    // A waypoint is "behind" when the next one is at least as close.
     while path.cursor + 1 < path.waypoints.len() {
+        let cursor_dist = drone_pos.distance(path.waypoints[path.cursor]);
+        // 1. Reached the current waypoint → skip to the next one.
+        if cursor_dist < WAYPOINT_REACHED_M {
+            path.cursor += 1;
+            continue;
+        }
+        // 2. Next waypoint is at least as close → drone has passed
+        //    the current one along the path direction.
         let next = path.waypoints[path.cursor + 1];
-        if drone_pos.distance(next) <= drone_pos.distance(path.waypoints[path.cursor]) {
+        if drone_pos.distance(next) <= cursor_dist {
             path.cursor += 1;
         } else {
             break;
