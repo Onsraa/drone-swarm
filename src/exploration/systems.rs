@@ -10,8 +10,9 @@ use crate::physics::{DesiredVelocity, LinearVelocity};
 use super::cluster::build_clusters;
 use super::components::{FrontierTarget, MovementHealth, Path};
 use super::constants::{
-    AVOID_RADIUS_M, FRONTIER_REACHED_DIST, PATH_FOLLOW_LERP_RATE, PLANNER_DOWNSAMPLE,
-    SCORE_UPGRADE_RATIO, STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS, STUCK_VEL_MPS,
+    AVOID_RADIUS_M, FRONTIER_REACHED_DIST, MAX_FRONTIER_CANDIDATES, PATH_FOLLOW_LERP_RATE,
+    PLANNER_DOWNSAMPLE, SCORE_UPGRADE_RATIO, STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS,
+    STUCK_VEL_MPS,
 };
 
 /// Cap how many A* calls run per frame to amortise the cost of large
@@ -138,9 +139,17 @@ pub struct PlannerScanState {
     pub coarse_dims: UVec3,
     pub word_cursor: usize,
     pub active: bool,
+    pub cooldown_secs: f32,
 }
 
+/// Gap between planner-grid rebuilds. Without it the scan restarts the
+/// instant it finishes (~160 ms at 120 FPS) → 6 finalisations per
+/// second. A 0.5 s cooldown caps it at ~1.5 Hz which is plenty for A*
+/// replans that fire on target-change anyway.
+const PLANNER_SCAN_COOLDOWN_SECS: f32 = 0.5;
+
 pub fn rebuild_planner_grid(
+    time: Res<Time>,
     mirror: Res<GpuGlobalOccupancyMirror>,
     world: Res<crate::world::WorldConfig>,
     mut state: Local<PlannerScanState>,
@@ -152,6 +161,10 @@ pub fn rebuild_planner_grid(
 
     // Start a fresh scan when the previous one finished.
     if !state.active {
+        state.cooldown_secs -= time.delta_secs();
+        if state.cooldown_secs > 0.0 {
+            return;
+        }
         let dims = world.size;
         let coarse_dims = UVec3::new(
             dims.x.div_ceil(PLANNER_DOWNSAMPLE),
@@ -234,6 +247,7 @@ pub fn rebuild_planner_grid(
         downsample,
     };
     state.active = false;
+    state.cooldown_secs = PLANNER_SCAN_COOLDOWN_SECS;
 }
 
 #[derive(Default)]
@@ -247,9 +261,9 @@ pub struct ClusterScanState {
 }
 
 /// Minimum gap between cluster-scan finalisations. Caps the `build_clusters`
-/// spike rate to ~2/s regardless of frame rate. At 240 FPS the 614 K-word
-/// scan would otherwise complete every ~80 ms = 12 spikes/s.
-const CLUSTER_SCAN_COOLDOWN_SECS: f32 = 0.5;
+/// spike rate to ~1/s regardless of frame rate. assign_targets re-scores
+/// every frame, so cluster freshness above 1 Hz is wasted CPU.
+const CLUSTER_SCAN_COOLDOWN_SECS: f32 = 1.0;
 
 pub fn compute_frontier_clusters(
     time: Res<Time>,
@@ -327,6 +341,9 @@ pub fn compute_frontier_clusters(
                     continue;
                 }
                 let nflat = nx as u32 + ny as u32 * dims.x + nz as u32 * plane;
+                if state.candidates.len() >= MAX_FRONTIER_CANDIDATES {
+                    continue;
+                }
                 if read(&state.snapshot, nflat) == 0 {
                     state.candidates.insert(UVec3::new(nx as u32, ny as u32, nz as u32));
                 }
