@@ -14,7 +14,6 @@ pub const PLANNER_UNKNOWN_COST_MULT: f32 = 3.0;
 pub const PLANNER_DEEP_UNKNOWN_MULT: f32 = 5.0;
 
 // Steering
-pub const PATH_FOLLOW_LERP_RATE: f32 = 3.0;
 /// Distance from the goal at which `steer_along_path` starts ramping
 /// `target_vel` magnitude down from `cruise` to zero. Linear ramp:
 /// outside this radius the drone requests full cruise; inside it the

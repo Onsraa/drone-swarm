@@ -7,7 +7,7 @@ use rand::{Rng, RngExt};
 use crate::exploration::{
     FrontierTarget, LastRoleChange, MovementHealth, Path, Role, RoleParams, Trail,
 };
-use crate::physics::{DesiredAttitude, DesiredVelocity, LinearVelocity, ThrustState};
+use crate::physics::{DesiredVelocity, LinearVelocity, PrevLinvel};
 use crate::world::WorldConfig;
 
 use super::components::{Drone, DroneColor, DroneId, PendingCenter, WanderTarget, WanderTimer};
@@ -66,8 +66,7 @@ fn spawn_one_drone(
             role,
             LinearVelocity::default(),
             DesiredVelocity::default(),
-            ThrustState::default(),
-            DesiredAttitude::default(),
+            PrevLinvel::default(),
             WanderTimer(Timer::from_seconds(
                 WANDER_CHANGE_INTERVAL_SECS,
                 TimerMode::Repeating,

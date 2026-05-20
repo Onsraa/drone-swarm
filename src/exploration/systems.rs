@@ -11,9 +11,8 @@ use super::cluster::build_clusters;
 use super::components::{FrontierTarget, MovementHealth, Path, Trail};
 use super::constants::{
     ARRIVAL_RADIUS_M, AVOID_RADIUS_M, FRONTIER_REACHED_DIST, MAX_FRONTIER_CANDIDATES,
-    PATH_FOLLOW_LERP_RATE, PLANNER_DOWNSAMPLE, SCORE_UPGRADE_RATIO,
-    STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS, STUCK_VEL_MPS, TRAIL_MAX_POINTS,
-    TRAIL_SAMPLE_INTERVAL_SECS,
+    PLANNER_DOWNSAMPLE, SCORE_UPGRADE_RATIO, STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS,
+    STUCK_VEL_MPS, TRAIL_MAX_POINTS, TRAIL_SAMPLE_INTERVAL_SECS,
 };
 
 /// Cap how many A* calls run per frame to amortise the cost of large
@@ -475,7 +474,6 @@ pub fn stuck_recovery(
     }
 }
 pub fn steer_along_path(
-    time: Res<Time>,
     mut q: Query<
         (
             &Transform,
@@ -487,7 +485,6 @@ pub fn steer_along_path(
         With<Drone>,
     >,
 ) {
-    let dt = time.delta_secs();
     for (transform, role, mut path, frontier, mut desired) in &mut q {
         let cruise = RoleParams::for_role(*role).cruise_speed_mps;
         if cruise <= 0.0 {
@@ -526,9 +523,11 @@ pub fn steer_along_path(
             .unwrap_or(goal);
         let dist_to_final = (final_pos - pos).length();
         let arrival_scale = (dist_to_final / ARRIVAL_RADIUS_M).clamp(0.0, 1.0);
-        let target_vel = (to_goal / dist) * cruise * arrival_scale;
-        let alpha = (PATH_FOLLOW_LERP_RATE * dt).min(1.0);
-        desired.0 = desired.0.lerp(target_vel, alpha);
+        // Direct write — no lerp here. The velocity tracker in
+        // `physics::track_velocity` already lerps `linvel` toward
+        // `desired`; doubling the lag delays pursuit by a full extra
+        // VEL_TRACK_GAIN time constant for no benefit.
+        desired.0 = (to_goal / dist) * cruise * arrival_scale;
     }
 }
 #[allow(clippy::too_many_arguments)]
