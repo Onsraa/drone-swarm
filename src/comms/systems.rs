@@ -2,7 +2,7 @@ use bevy::color::palettes::tailwind;
 use bevy::prelude::*;
 
 use crate::drone::{Drone, DroneId};
-use crate::world::WorldConfig;
+use crate::world::{GroundTruthMap, WorldConfig};
 
 use super::constants::BASE_DEFAULT_HEIGHT_M;
 use super::resources::{CommsSettings, CommsState};
@@ -14,11 +14,24 @@ use super::resources::{CommsSettings, CommsState};
 pub fn compute_connectivity(
     settings: Res<CommsSettings>,
     world: Res<WorldConfig>,
+    map: Option<Res<GroundTruthMap>>,
     drones: Query<(&DroneId, &Transform), With<Drone>>,
     mut state: ResMut<CommsState>,
 ) {
     let center = world.center();
-    let base_pos = Vec3::new(center.x, BASE_DEFAULT_HEIGHT_M, center.z);
+    // Base sits at the center column. Use the same terrain-aware
+    // helper drones use for their spawn: walk the column upward,
+    // pick the first cell with 4 clear cells above it. Falls back
+    // to the legacy 1 m default when no map is loaded or the
+    // column is fully blocked.
+    let cell_x = (center.x / world.voxel_size).floor() as i32;
+    let cell_z = (center.z / world.voxel_size).floor() as i32;
+    let base_y = map
+        .as_deref()
+        .and_then(|m| m.safe_spawn_cell_y(cell_x, cell_z, 4))
+        .map(|cy| (cy as f32 + 0.5) * world.voxel_size + 1.0)
+        .unwrap_or(BASE_DEFAULT_HEIGHT_M);
+    let base_pos = Vec3::new(center.x, base_y, center.z);
     state.base_pos = base_pos;
     state.total_count = drones.iter().count();
 

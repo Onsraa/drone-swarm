@@ -32,9 +32,9 @@ use super::constants::{
 const MAX_REPLANS_PER_FRAME: usize = 4;
 use super::planner::{plan, PlanScratch};
 use super::resources::{FrontierClusters, PlannerGrid};
-use super::steering::{pure_pursuit, reactive_force};
+use super::steering::{pure_pursuit, reactive_force, reactive_force_peers};
 use super::scoring::{score, ScoringWeights};
-use super::role::{Role, RoleParams};
+use super::role::{peer_repulsion_for, Role, RoleParams};
 use rand::RngExt;
 
 pub fn assign_targets(
@@ -773,13 +773,13 @@ pub fn apply_role_steering(
     mirror: Res<GpuGlobalOccupancyMirror>,
     world: Res<crate::world::WorldConfig>,
     mut q_self: Query<(&DroneId, &Transform, &Role, &mut DesiredVelocity), With<Drone>>,
-    q_peers: Query<(&DroneId, &Transform), With<Drone>>,
+    q_peers: Query<(&DroneId, &Transform, &Role), With<Drone>>,
     mut hits_buf: Local<Vec<Vec3>>,
-    mut peers_buf: Local<Vec<Vec3>>,
-    mut peer_snap: Local<Vec<(u32, Vec3)>>,
+    mut peers_buf: Local<Vec<(Vec3, f32)>>,
+    mut peer_snap: Local<Vec<(u32, Vec3, Role)>>,
 ) {
     peer_snap.clear();
-    peer_snap.extend(q_peers.iter().map(|(id, t)| (id.0, t.translation)));
+    peer_snap.extend(q_peers.iter().map(|(id, t, r)| (id.0, t.translation, *r)));
 
     let data = &mirror.data;
     let dims = world.size;
@@ -792,14 +792,21 @@ pub fn apply_role_steering(
         let cruise = RoleParams::for_role(*role).cruise_speed_mps;
         let avoid_k = RoleParams::for_role(*role).avoid_k;
 
-        // Peer separation — peers always repel regardless of comms.
+        // Peer separation — pair-wise stiffness. Scouts barely brake
+        // for Mappers (k = 1) but Mappers actively yield to Scouts
+        // (k = 28). Anchors don't move at all. See
+        // `peer_repulsion_for` in `role.rs`.
         peers_buf.clear();
-        for (pid, p) in peer_snap.iter() {
-            if *pid != id.0 {
-                peers_buf.push(*p);
+        for (pid, p, peer_role) in peer_snap.iter() {
+            if *pid == id.0 {
+                continue;
+            }
+            let k = peer_repulsion_for(*role, *peer_role);
+            if k > 0.0 {
+                peers_buf.push((*p, k));
             }
         }
-        let separation = reactive_force(pos, &[], &peers_buf, avoid_k);
+        let separation = reactive_force_peers(pos, &peers_buf);
 
         // Terrain repulsion from lidar hits in a small cube around
         // the drone. Reads the global occupancy mirror (CPU copy of

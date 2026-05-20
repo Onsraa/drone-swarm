@@ -25,6 +25,7 @@ pub fn respawn_drones_if_needed(
     mut commands: Commands,
     spawn_config: Res<DroneSpawnConfig>,
     world: Res<WorldConfig>,
+    map: Option<Res<crate::world::GroundTruthMap>>,
     asset_server: Res<AssetServer>,
     drones_q: Query<Entity, With<Drone>>,
 ) {
@@ -38,7 +39,13 @@ pub fn respawn_drones_if_needed(
     let world_center = world.center();
     let target = spawn_config.target_count;
     for id in 0..target {
-        let spawn_pos = ring_position(world_center, id, target);
+        let spawn_pos = ring_position(
+            world_center,
+            id,
+            target,
+            map.as_deref(),
+            world.voxel_size,
+        );
         let role = role_for_index(id, target);
         let tint = RoleParams::for_role(role).tint;
         let color = Color::linear_rgba(tint[0], tint[1], tint[2], tint[3]);
@@ -107,16 +114,42 @@ pub fn sync_color_to_role(
 
 /// Stagger N drones around the world center on a horizontal ring of
 /// `DRONE_SPAWN_RADIUS_METERS`. With N = 1 the drone lands at center.
-fn ring_position(center: Vec3, id: u32, count: u32) -> Vec3 {
-    if count <= 1 {
-        return center;
-    }
-    let angle = (id as f32 / count as f32) * TAU;
-    Vec3::new(
-        center.x + angle.cos() * DRONE_SPAWN_RADIUS_METERS,
-        center.y,
-        center.z + angle.sin() * DRONE_SPAWN_RADIUS_METERS,
-    )
+///
+/// Altitude comes from `GroundTruthMap::safe_spawn_cell_y` when a map
+/// is present: walks the column at the drone's (x, z) and picks the
+/// lowest Free cell that has 4 cells of clearance above it. Falls back
+/// to `center.y` if no map is loaded or the column is fully occupied.
+/// A tiny per-id altitude jitter prevents perfect stacking on the
+/// same Y plane.
+fn ring_position(
+    center: Vec3,
+    id: u32,
+    count: u32,
+    map: Option<&crate::world::GroundTruthMap>,
+    voxel_size: f32,
+) -> Vec3 {
+    let (x, z) = if count <= 1 {
+        (center.x, center.z)
+    } else {
+        let angle = (id as f32 / count as f32) * TAU;
+        (
+            center.x + angle.cos() * DRONE_SPAWN_RADIUS_METERS,
+            center.z + angle.sin() * DRONE_SPAWN_RADIUS_METERS,
+        )
+    };
+
+    let cell_x = (x / voxel_size).floor() as i32;
+    let cell_z = (z / voxel_size).floor() as i32;
+    let y = map
+        .and_then(|m| m.safe_spawn_cell_y(cell_x, cell_z, 4))
+        .map(|cy| (cy as f32 + 0.5) * voxel_size + 3.0)
+        .unwrap_or(center.y);
+
+    // 0–1.5 m altitude jitter per id so consecutive drones don't
+    // stack on identical Y at spawn (and immediately fight the
+    // peer-bubble).
+    let jitter = (id as f32 % 4.0) * 0.5;
+    Vec3::new(x, y + jitter, z)
 }
 
 /// Assign a default role based on position in the fleet.

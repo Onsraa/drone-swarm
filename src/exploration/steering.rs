@@ -39,8 +39,10 @@ pub fn pure_pursuit(path: &mut Path, drone_pos: Vec3) -> Option<Vec3> {
 }
 
 /// Quadratic-falloff repulsion for terrain hits. Each obstacle within
-/// its radius contributes a force pointing from obstacle to drone,
-/// scaled by `avoid_k * (1 - d/R)^2`.
+/// `AVOID_RADIUS_M` contributes a force pointing from obstacle to
+/// drone, scaled by `avoid_k * (1 - d/R)^2`. Peers are handled by the
+/// separate `reactive_force_peers` so each (self_role, peer_role) pair
+/// can carry its own multiplier.
 pub fn reactive_force(
     drone_pos: Vec3,
     lidar_hits: &[Vec3],
@@ -80,6 +82,33 @@ pub fn reactive_force(
     }
     for &peer in peer_positions {
         total += peer_scale(peer);
+    }
+    total
+}
+
+/// Peer repulsion with per-pair stiffness. Each `peers` entry carries
+/// its position + a precomputed `k` value selected by the caller from
+/// the `peer_repulsion_for(self_role, peer_role)` table. This is what
+/// makes Scouts plow through Mapper bubbles (low k from Scout's side)
+/// while Mappers actively yield (high k from Mapper's side). Same
+/// falloff curve as the terrain path — quadratic outside the bubble,
+/// near-singular `(R/d - 1)` term inside `PEER_BUBBLE_RADIUS_M` so
+/// drones cannot inter-penetrate even when k is low.
+pub fn reactive_force_peers(drone_pos: Vec3, peers: &[(Vec3, f32)]) -> Vec3 {
+    let mut total = Vec3::ZERO;
+    for &(pos, k) in peers {
+        let dir = drone_pos - pos;
+        let d = dir.length();
+        if d < 1e-3 || d > AVOID_RADIUS_PEER_M {
+            continue;
+        }
+        let outer = k * (1.0 - d / AVOID_RADIUS_PEER_M).powi(2);
+        let inner = if d < PEER_BUBBLE_RADIUS_M {
+            k * (PEER_BUBBLE_RADIUS_M / d - 1.0)
+        } else {
+            0.0
+        };
+        total += (dir / d) * (outer + inner);
     }
     total
 }

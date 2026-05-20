@@ -28,6 +28,23 @@ pub struct RoleParams {
     pub tint: [f32; 4], // linear RGBA before alpha
 }
 
+/// Per-pair peer-repulsion stiffness. `peer_repulsion_for(self, peer)`
+/// = "how strongly a drone of role `self` is pushed by a peer of role
+/// `peer`". Asymmetric: Scout barely cares about Mapper bubbles (k=1)
+/// but Mapper yields hard to incoming Scouts (k=28). Anchors don't
+/// move so their value is 0 across the row.
+pub fn peer_repulsion_for(self_role: Role, peer_role: Role) -> f32 {
+    match (self_role, peer_role) {
+        (Role::Scout, Role::Scout) => 8.0,
+        (Role::Scout, Role::Mapper) => 1.0,
+        (Role::Scout, Role::Anchor) => 2.0,
+        (Role::Mapper, Role::Scout) => 28.0,
+        (Role::Mapper, Role::Mapper) => 12.0,
+        (Role::Mapper, Role::Anchor) => 6.0,
+        (Role::Anchor, _) => 0.0,
+    }
+}
+
 impl RoleParams {
     pub fn for_role(role: Role) -> Self {
         match role {
