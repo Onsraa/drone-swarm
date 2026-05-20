@@ -11,7 +11,7 @@ pub mod systems;
 
 use bevy::prelude::*;
 
-pub use components::{FrontierTarget, MovementHealth, Path, Trail};
+pub use components::{FrontierTarget, GhostMemory, MovementHealth, Path, Trail};
 pub use resources::{FrontierClusters, PlannerGrid};
 pub use role::{Role, RoleParams};
 pub use supervisor::{LastRoleChange, SupervisorTimer};

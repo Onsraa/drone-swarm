@@ -82,7 +82,12 @@ impl RoleParams {
                 tint: [0.3, 0.8, 0.35, 0.85],
             },
             Role::Anchor => Self {
-                cruise_speed_mps: 0.0,
+                // Anchor moves but slowly + purposefully: it
+                // repositions to maintain the comms chain back to
+                // base, not to map. The relay algorithm in
+                // `apply_role_steering` decides where; cruise just
+                // sets the speed cap.
+                cruise_speed_mps: 3.0,
                 cone_half_angle_deg: 180.0,
                 max_range_cells: 128,
                 // Anchor doesn't map. `rays_per_scan = 0` makes the

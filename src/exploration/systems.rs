@@ -18,7 +18,7 @@ use crate::pheromone::PheromoneField;
 use crate::physics::{DesiredVelocity, LinearVelocity};
 
 use super::cluster::build_clusters;
-use super::components::{FrontierTarget, MovementHealth, Path, Trail};
+use super::components::{FrontierTarget, GhostMemory, GhostPeer, MovementHealth, Path, Trail};
 use super::constants::{
     ARRIVAL_RADIUS_M, AVOID_RADIUS_M, FRONTIER_REACHED_DIST, MAX_FRONTIER_CANDIDATES,
     PLANNER_DOWNSAMPLE, SCORE_UPGRADE_RATIO, STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS,
@@ -769,10 +769,22 @@ pub fn draw_path_gizmos(
 /// physics tracker.
 #[allow(clippy::too_many_arguments)]
 pub fn apply_role_steering(
+    time: Res<Time>,
     pheromone: Res<PheromoneField>,
     mirror: Res<GpuGlobalOccupancyMirror>,
     world: Res<crate::world::WorldConfig>,
-    mut q_self: Query<(&DroneId, &Transform, &Role, &mut DesiredVelocity), With<Drone>>,
+    comms_state: Res<CommsState>,
+    comms_settings: Res<crate::comms::CommsSettings>,
+    mut q_self: Query<
+        (
+            &DroneId,
+            &Transform,
+            &Role,
+            &mut DesiredVelocity,
+            &mut GhostMemory,
+        ),
+        With<Drone>,
+    >,
     q_peers: Query<(&DroneId, &Transform, &Role), With<Drone>>,
     mut hits_buf: Local<Vec<Vec3>>,
     mut peers_buf: Local<Vec<(Vec3, f32)>>,
@@ -780,6 +792,9 @@ pub fn apply_role_steering(
 ) {
     peer_snap.clear();
     peer_snap.extend(q_peers.iter().map(|(id, t, r)| (id.0, t.translation, *r)));
+    let now = time.elapsed_secs();
+    let comms_range = comms_settings.range_m;
+    let central_pos = comms_state.base_pos;
 
     let data = &mirror.data;
     let dims = world.size;
@@ -787,7 +802,7 @@ pub fn apply_role_steering(
     let world_center = world.center();
     let radius_cells = (AVOID_RADIUS_M / voxel_size).ceil() as i32;
 
-    for (id, transform, role, mut desired) in &mut q_self {
+    for (id, transform, role, mut desired, mut ghost) in &mut q_self {
         let pos = transform.translation;
         let cruise = RoleParams::for_role(*role).cruise_speed_mps;
         let avoid_k = RoleParams::for_role(*role).avoid_k;
@@ -876,10 +891,69 @@ pub fn apply_role_steering(
                 }
             }
             Role::Anchor => {
-                // Phase 4 will replace this with the geometric-median
-                // relay-positioning algorithm. For now anchors hover
-                // at their current position.
-                Vec3::ZERO
+                // Update ghost memory: any peer currently in comms
+                // range refreshes its last-known position; ghosts
+                // older than GHOST_FORGET_SECS get dropped.
+                let range_sq = comms_range * comms_range;
+                for (pid, p, _r) in peer_snap.iter() {
+                    if *pid == id.0 {
+                        continue;
+                    }
+                    if pos.distance_squared(*p) <= range_sq {
+                        ghost.peers.insert(
+                            *pid,
+                            super::components::GhostPeer {
+                                last_pos: *p,
+                                last_seen_secs: now,
+                            },
+                        );
+                    }
+                }
+                ghost.peers.retain(|_, g| now - g.last_seen_secs < GHOST_FORGET_SECS);
+
+                // Connection state vs central.
+                let half = (id.0 >= 32) as usize;
+                let in_chain =
+                    (comms_state.connected_mask[half] >> (id.0 % 32)) & 1 == 1;
+
+                // Decide target: out-of-chain → move toward central;
+                // peer near range limit → move toward that peer's
+                // last-known position; otherwise hover at the
+                // geometric median of remembered peers.
+                let target = if !comms_settings.enabled || ghost.peers.is_empty() {
+                    // Comms gating off OR no peers ever seen — just
+                    // sit at central as a passive relay.
+                    central_pos
+                } else if !in_chain {
+                    central_pos
+                } else {
+                    let critical_radius = comms_range * 0.85;
+                    let critical = ghost
+                        .peers
+                        .values()
+                        .filter(|g| pos.distance(g.last_pos) > critical_radius)
+                        .max_by(|a, b| {
+                            pos.distance(a.last_pos)
+                                .partial_cmp(&pos.distance(b.last_pos))
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        })
+                        .map(|g| g.last_pos);
+                    match critical {
+                        Some(p) => p,
+                        None => geometric_median_of_ghosts(&ghost.peers, pos),
+                    }
+                };
+
+                let to_target = target - pos;
+                let dist = to_target.length();
+                if dist < 0.5 {
+                    Vec3::ZERO
+                } else {
+                    // Arrival ramp: full cruise outside 5 m, taper
+                    // linearly to zero at the target.
+                    let scale = (dist / 5.0).clamp(0.0, 1.0);
+                    (to_target / dist) * cruise * scale
+                }
             }
         };
 
@@ -896,4 +970,40 @@ pub fn apply_role_steering(
         let total = role_capped + avoid_combined;
         desired.0 = total.clamp_length_max((cruise + avoid_cap).max(2.0));
     }
+}
+
+/// Forget peer ghosts older than this many seconds. Anchors don't
+/// trust position estimates from observations more than a few seconds
+/// stale — comms range is the spec, and the swarm moves fast enough
+/// that 5 s is already several body-lengths of drift.
+const GHOST_FORGET_SECS: f32 = 5.0;
+
+/// Weiszfeld iteration for the geometric median (the point minimizing
+/// the sum of L2 distances to a set of input points). Anchors use this
+/// to hover "between" their visible peers rather than at the centroid
+/// (which gets pulled by clumps). 5 iterations is plenty to converge
+/// within sub-meter accuracy for the ≤ 50 peers we ever see.
+fn geometric_median_of_ghosts(
+    peers: &bevy::platform::collections::HashMap<u32, GhostPeer>,
+    fallback: Vec3,
+) -> Vec3 {
+    if peers.is_empty() {
+        return fallback;
+    }
+    let n = peers.len() as f32;
+    let mut y: Vec3 = peers.values().fold(Vec3::ZERO, |a, g| a + g.last_pos) / n;
+    for _ in 0..5 {
+        let mut num = Vec3::ZERO;
+        let mut den = 0.0;
+        for g in peers.values() {
+            let d = (y - g.last_pos).length().max(0.01);
+            let w = 1.0 / d;
+            num += g.last_pos * w;
+            den += w;
+        }
+        if den > 0.0 {
+            y = num / den;
+        }
+    }
+    y
 }
