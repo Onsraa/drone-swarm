@@ -15,6 +15,13 @@ pub const PLANNER_DEEP_UNKNOWN_MULT: f32 = 5.0;
 
 // Steering
 pub const PATH_FOLLOW_LERP_RATE: f32 = 3.0;
+/// Distance from the goal at which `steer_along_path` starts ramping
+/// `target_vel` magnitude down from `cruise` to zero. Linear ramp:
+/// outside this radius the drone requests full cruise; inside it the
+/// requested speed scales with distance / ARRIVAL_RADIUS_M so the
+/// quadcopter controller sees a negative forward-error and can pitch
+/// backward to brake.
+pub const ARRIVAL_RADIUS_M: f32 = 10.0;
 pub const AVOID_RADIUS_M: f32 = 4.0;
 pub const AVOID_RADIUS_PEER_M: f32 = 6.0;
 

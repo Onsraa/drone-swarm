@@ -10,9 +10,10 @@ use crate::physics::{DesiredVelocity, LinearVelocity};
 use super::cluster::build_clusters;
 use super::components::{FrontierTarget, MovementHealth, Path, Trail};
 use super::constants::{
-    AVOID_RADIUS_M, FRONTIER_REACHED_DIST, MAX_FRONTIER_CANDIDATES, PATH_FOLLOW_LERP_RATE,
-    PLANNER_DOWNSAMPLE, SCORE_UPGRADE_RATIO, STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS,
-    STUCK_VEL_MPS, TRAIL_MAX_POINTS, TRAIL_SAMPLE_INTERVAL_SECS,
+    ARRIVAL_RADIUS_M, AVOID_RADIUS_M, FRONTIER_REACHED_DIST, MAX_FRONTIER_CANDIDATES,
+    PATH_FOLLOW_LERP_RATE, PLANNER_DOWNSAMPLE, SCORE_UPGRADE_RATIO,
+    STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS, STUCK_VEL_MPS, TRAIL_MAX_POINTS,
+    TRAIL_SAMPLE_INTERVAL_SECS,
 };
 
 /// Cap how many A* calls run per frame to amortise the cost of large
@@ -511,7 +512,14 @@ pub fn steer_along_path(
         if dist < 1e-3 {
             continue;
         }
-        let target_vel = (to_goal / dist) * cruise;
+        // Arrival ramp: scale cruise by min(dist / ARRIVAL_RADIUS, 1.0).
+        // Far away → full cruise. Inside the arrival radius → linearly
+        // taper to 0 at the goal so the controller sees a negative
+        // forward-error and can pitch backward to brake. Without this
+        // the drone always requests `cruise` m/s even at 1 m out,
+        // overshooting + oscillating around the target.
+        let arrival_scale = (dist / ARRIVAL_RADIUS_M).clamp(0.0, 1.0);
+        let target_vel = (to_goal / dist) * cruise * arrival_scale;
         let alpha = (PATH_FOLLOW_LERP_RATE * dt).min(1.0);
         desired.0 = desired.0.lerp(target_vel, alpha);
     }

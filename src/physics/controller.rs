@@ -14,10 +14,12 @@ use super::constants::{
 ///    horizontal velocity; the drone yaws to face its target before doing
 ///    anything else. This guarantees motion is along the drone's head
 ///    direction (no backward / sideways drift).
-/// 2. **Pitch:** while facing forward, the drone pitches nose-down by an
-///    amount such that thrust along body +Y produces the required forward
-///    acceleration. Pitch is clamped >= 0 so the drone never tilts back-
-///    ward; slowing is handled by drag.
+/// 2. **Pitch:** signed forward-velocity error drives pitch. Positive
+///    error (too slow) → pitch nose-down so body +Y thrust accelerates
+///    the drone forward. Negative error (too fast / past the goal) →
+///    pitch nose-up so the same thrust decelerates it. Clamped to
+///    `±MAX_PITCH_RADIANS` either way. This gives active braking
+///    instead of relying purely on drag.
 /// 3. **Thrust magnitude:** chosen so the vertical component of thrust
 ///    counters gravity plus a vertical-velocity error term, giving an
 ///    altitude-hold + climb/descend behavior.
@@ -57,10 +59,16 @@ pub fn quadcopter_controller(
 
         let forward_speed_actual = linvel.0.dot(current_forward_horizontal);
         let forward_speed_target = desired_speed;
+        // Signed error → signed pitch. Negative pitch tilts the nose
+        // up so body +Y has a backward horizontal component, which
+        // brakes the drone when it's faster than the requested speed
+        // (typically as it nears the arrival ramp).
         let forward_accel_target =
-            ((forward_speed_target - forward_speed_actual) * FORWARD_P_GAIN).max(0.0);
+            (forward_speed_target - forward_speed_actual) * FORWARD_P_GAIN;
 
-        let pitch_target = (forward_accel_target / GRAVITY).atan().min(MAX_PITCH_RADIANS);
+        let pitch_target = (forward_accel_target / GRAVITY)
+            .atan()
+            .clamp(-MAX_PITCH_RADIANS, MAX_PITCH_RADIANS);
         let pitch_quat = Quat::from_rotation_x(-pitch_target);
 
         attitude.target_rotation = yaw_quat * pitch_quat;
