@@ -1,20 +1,8 @@
 use bevy::asset::Assets;
-use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::render::gpu_readback::Readback;
 
 use crate::drone::Drone;
-use crate::exploration::{FrontierClusters, FrontierTarget, MovementHealth, Path, PlannerGrid};
-
-/// Bundles the exploration-state reset params into one `SystemParam`
-/// so `apply_pending_swap` stays within Bevy's 16-parameter system
-/// limit.
-#[derive(SystemParam)]
-pub(crate) struct ExplorationResetParams<'w, 's> {
-    grid: ResMut<'w, PlannerGrid>,
-    paths: Query<'w, 's, &'static mut Path>,
-    health: Query<'w, 's, &'static mut MovementHealth>,
-}
 use crate::lidar::gpu::{
     BuildIndirectBuffer, BuildLocalParamsBuffer, DroneColorsBuffer, DroneOrientationsBuffer,
     DronePositionsBuffer, GlobalActiveCellsBuffer, GlobalActiveCountBuffer,
@@ -95,9 +83,6 @@ pub fn apply_pending_swap(
     readbacks: Query<Entity, With<Readback>>,
     mut stats: ResMut<GpuGlobalStats>,
     mut mirror: ResMut<GpuGlobalOccupancyMirror>,
-    mut clusters: ResMut<FrontierClusters>,
-    mut frontier_targets: Query<&mut FrontierTarget>,
-    mut exploration: ExplorationResetParams,
 ) {
     let Some(handle) = pending.handle.clone() else {
         return;
@@ -150,21 +135,6 @@ pub fn apply_pending_swap(
 
     *stats = GpuGlobalStats::default();
     mirror.data.clear();
-    clusters.entries.clear();
-    clusters.next_id = 0;
-    for mut t in &mut frontier_targets {
-        t.pos = None;
-        t.cluster_id = None;
-    }
-
-    *exploration.grid = PlannerGrid::default();
-    for mut p in &mut exploration.paths {
-        p.waypoints.clear();
-        p.cursor = 0;
-    }
-    for mut h in &mut exploration.health {
-        *h = MovementHealth::default();
-    }
 
     let map = GroundTruthMap::from_bitset(asset.dims, &asset.bitset);
     let occupied = map.count_occupied();

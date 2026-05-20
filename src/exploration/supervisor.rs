@@ -3,10 +3,7 @@ use std::time::Duration;
 
 use crate::comms::{CommsSettings, CommsState};
 use crate::drone::{Drone, DroneId};
-use crate::world::WorldConfig;
 
-use super::components::FrontierTarget;
-use super::resources::FrontierClusters;
 use super::role::Role;
 
 #[derive(Debug, Clone, Copy)]
@@ -156,10 +153,7 @@ pub fn supervisor_tick(
     mut timer: ResMut<SupervisorTimer>,
     comms: Res<CommsState>,
     comms_settings: Res<CommsSettings>,
-    clusters: Res<FrontierClusters>,
-    world: Res<WorldConfig>,
     mut drones: Query<(&DroneId, &Transform, &mut Role, &mut LastRoleChange), With<Drone>>,
-    mut targets: Query<(&DroneId, &Transform, &mut FrontierTarget), With<Drone>>,
 ) {
     timer.0.tick(time.delta());
     if !timer.0.just_finished() {
@@ -183,11 +177,10 @@ pub fn supervisor_tick(
     } else {
         comms.connected_count as f32 / total as f32
     };
-    let farthest_frontier_m = clusters
-        .entries
-        .iter()
-        .map(|c| c.centroid.distance(world.center()))
-        .fold(0.0_f32, f32::max);
+    // Frontier-clusters retired; SwarmTelemetry's farthest_frontier_m
+    // field is now a constant 0. `decide_ratio`'s behaviour around
+    // that branch stays stable (ratio still skews via comms_density).
+    let farthest_frontier_m = 0.0;
     let known_free_ratio = 0.3; // Placeholder until coverage telemetry wired.
 
     let ratio = decide_ratio(&SwarmTelemetry {
@@ -238,21 +231,15 @@ pub fn supervisor_tick(
             let (anchor_drone_id, _) = sorted_positions[idx];
 
             // Set role → Anchor and reset the smoothing clock.
+            // `apply_role_steering`'s anchor branch handles the
+            // positioning via ghost-memory + geometric median; no
+            // need to seed a target here.
             for (id, _, mut role, mut last_change) in drones.iter_mut() {
                 if id.0 != anchor_drone_id {
                     continue;
                 }
                 *role = Role::Anchor;
                 last_change.0 = now;
-                break;
-            }
-
-            // Freeze the FrontierTarget to the drone's current position.
-            for (id, t, mut target) in targets.iter_mut() {
-                if id.0 != anchor_drone_id {
-                    continue;
-                }
-                target.pos = Some(t.translation);
                 break;
             }
         }

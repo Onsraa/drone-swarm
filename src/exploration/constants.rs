@@ -1,26 +1,4 @@
-// Frontier scan + clustering
-pub const FRONTIER_REACHED_DIST: f32 = 6.0;
-/// Cap on candidate cells the time-sliced frontier scan collects in a
-/// single sweep. Smaller cap = cheaper `build_clusters` finalize spike
-/// (the per-cell flood-fill scales linearly). 5 K cells is plenty for
-/// the assignment + crowding signal at typical exploration densities.
-pub const MAX_FRONTIER_CANDIDATES: usize = 5_000;
-pub const MIN_CLUSTER_SIZE: usize = 4;
-
-// Planner
-pub const PLANNER_DOWNSAMPLE: u32 = 8;
-pub const PLANNER_FREE_COST: f32 = 1.0;
-pub const PLANNER_UNKNOWN_COST_MULT: f32 = 3.0;
-pub const PLANNER_DEEP_UNKNOWN_MULT: f32 = 5.0;
-
-// Steering
-/// Distance from the goal at which `steer_along_path` starts ramping
-/// `target_vel` magnitude down from `cruise` to zero. Linear ramp:
-/// outside this radius the drone requests full cruise; inside it the
-/// requested speed scales with distance / ARRIVAL_RADIUS_M so the
-/// quadcopter controller sees a negative forward-error and can pitch
-/// backward to brake.
-pub const ARRIVAL_RADIUS_M: f32 = 10.0;
+// Reactive avoidance — terrain cube scan + peer separation.
 pub const AVOID_RADIUS_M: f32 = 4.0;
 /// Personal-space radius for peer drones. Bigger than terrain radius
 /// + non-linear falloff under the hard "personal bubble" radius
@@ -31,18 +9,6 @@ pub const AVOID_RADIUS_PEER_M: f32 = 10.0;
 /// (1 - d/R)² falloff used outside it. Effect: drones cannot
 /// inter-penetrate because the force diverges at zero distance.
 pub const PEER_BUBBLE_RADIUS_M: f32 = 3.0;
-
-// Stuck detection
-pub const STUCK_VEL_MPS: f32 = 0.5;
-pub const STUCK_SECS: f32 = 3.0;
-pub const STUCK_ESCALATION_WINDOW_SECS: f32 = 20.0;
-
-// Scoring (role-agnostic Phase 1 defaults; per-role weights live in RoleParams)
-pub const SCORE_INFO_WEIGHT: f32 = 1.0;
-pub const SCORE_DISTANCE_WEIGHT: f32 = 1.0;
-pub const SCORE_DISTANCE_BIAS: f32 = 1.0;
-pub const SCORE_CROWDING_WEIGHT: f32 = 1.0;
-pub const SCORE_UPGRADE_RATIO: f32 = 1.5;
 
 // Trail (gizmo viz)
 /// Points retained per-drone in the trail buffer. 120 samples × 0.2 s

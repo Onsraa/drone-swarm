@@ -1,42 +1,5 @@
-use super::components::Path;
 use super::constants::{AVOID_RADIUS_M, AVOID_RADIUS_PEER_M, PEER_BUBBLE_RADIUS_M};
 use bevy::prelude::*;
-
-/// Distance under which a waypoint is considered "reached" and the
-/// cursor advances unconditionally. Without this, `pure_pursuit` will
-/// sit at a waypoint that's slightly closer than the next one, even
-/// when the drone is essentially AT the waypoint — particularly
-/// `waypoints[0]`, which equals the drone's position at the moment the
-/// path was planned. Drone wobbles in place around the start waypoint,
-/// never advancing.
-const WAYPOINT_REACHED_M: f32 = 2.0;
-
-/// Pure-pursuit waypoint selection. Advances the path cursor past any
-/// waypoints the drone has reached or passed, then returns the current
-/// cursor waypoint as the steering target. Returns `None` for empty
-/// paths.
-pub fn pure_pursuit(path: &mut Path, drone_pos: Vec3) -> Option<Vec3> {
-    if path.waypoints.is_empty() {
-        return None;
-    }
-    while path.cursor + 1 < path.waypoints.len() {
-        let cursor_dist = drone_pos.distance(path.waypoints[path.cursor]);
-        // 1. Reached the current waypoint → skip to the next one.
-        if cursor_dist < WAYPOINT_REACHED_M {
-            path.cursor += 1;
-            continue;
-        }
-        // 2. Next waypoint is at least as close → drone has passed
-        //    the current one along the path direction.
-        let next = path.waypoints[path.cursor + 1];
-        if drone_pos.distance(next) <= cursor_dist {
-            path.cursor += 1;
-        } else {
-            break;
-        }
-    }
-    path.waypoints.get(path.cursor).copied()
-}
 
 /// Quadratic-falloff repulsion for terrain hits. Each obstacle within
 /// `AVOID_RADIUS_M` contributes a force pointing from obstacle to
@@ -143,27 +106,4 @@ mod tests {
         assert_eq!(f, Vec3::ZERO);
     }
 
-    #[test]
-    fn pursuit_advances_cursor() {
-        let mut path = Path {
-            waypoints: vec![
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(10.0, 0.0, 0.0),
-                Vec3::new(20.0, 0.0, 0.0),
-            ],
-            cursor: 0,
-        };
-        let drone = Vec3::new(5.0, 0.0, 0.0);
-        let target = pure_pursuit(&mut path, drone);
-        // Cursor should advance past waypoint 0 since drone is between 0 and 1.
-        assert_eq!(path.cursor, 1);
-        // Look-ahead should aim at waypoint 1 (10 m) since that's within LOOKAHEAD_M=8 m? Actually 10 > 8 so target IS waypoint 1.
-        assert_eq!(target, Some(Vec3::new(10.0, 0.0, 0.0)));
-    }
-
-    #[test]
-    fn empty_path_returns_none() {
-        let mut path = Path::default();
-        assert!(pure_pursuit(&mut path, Vec3::ZERO).is_none());
-    }
 }

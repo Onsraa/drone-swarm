@@ -1,59 +1,6 @@
-use bevy::prelude::*;
-
-#[derive(Debug, Clone)]
-pub struct FrontierCluster {
-    pub id: u32,
-    pub centroid: Vec3,
-    /// Cells inside the cluster. Populated by `build_clusters`; tests
-    /// inspect it. Production consumers (anchor placement, info-gain
-    /// refinement) are queued for future work.
-    #[allow(dead_code)]
-    pub cells: Vec<UVec3>,
-    pub info_gain: f32,
-    /// Cluster bbox in cell units. Held for debug overlays / future
-    /// info-gain refinement; the assign_targets auction uses
-    /// `centroid` + greedy claim only.
-    #[allow(dead_code)]
-    pub bbox_min: UVec3,
-    #[allow(dead_code)]
-    pub bbox_max: UVec3,
-}
-
-#[derive(Resource, Default, Debug)]
-pub struct FrontierClusters {
-    pub entries: Vec<FrontierCluster>,
-    pub next_id: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CoarseCell {
-    Free,
-    Unknown,
-    Blocked,
-}
-
-#[derive(Resource, Default, Debug)]
-pub struct PlannerGrid {
-    pub coarse: Vec<CoarseCell>,
-    pub dims: UVec3,
-    pub voxel_size: f32,
-    pub downsample: u32,
-}
-
-impl PlannerGrid {
-    pub fn idx(&self, c: UVec3) -> Option<usize> {
-        if c.x >= self.dims.x || c.y >= self.dims.y || c.z >= self.dims.z {
-            return None;
-        }
-        Some(((c.z * self.dims.y + c.y) * self.dims.x + c.x) as usize)
-    }
-    pub fn at(&self, c: UVec3) -> CoarseCell {
-        self.idx(c)
-            .and_then(|i| self.coarse.get(i).copied())
-            .unwrap_or(CoarseCell::Unknown)
-    }
-    pub fn world_pos_of(&self, c: UVec3) -> Vec3 {
-        let cell_size = self.voxel_size * self.downsample as f32;
-        Vec3::new(c.x as f32, c.y as f32, c.z as f32) * cell_size + Vec3::splat(cell_size * 0.5)
-    }
-}
+// All previously-used resources (`FrontierClusters`, `PlannerGrid`,
+// `CoarseCell`, `FrontierCluster`) were retired with the foraging-
+// colony rewrite. Pheromone-driven steering doesn't need a planner
+// grid or frontier clusters — there are no targets. This file is
+// kept as a placeholder in case future work needs to reintroduce a
+// per-role resource.

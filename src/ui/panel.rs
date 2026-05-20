@@ -5,7 +5,7 @@ use bevy_egui::{egui, EguiContexts};
 use crate::camera::CameraMode;
 use crate::comms::{CommsSettings, CommsState, MAX_COMMS_RANGE_M, MIN_COMMS_RANGE_M};
 use crate::drone::{Drone, DroneColor, DroneId, DroneSpawnConfig, MAX_DRONE_COUNT, MIN_DRONE_COUNT};
-use crate::exploration::{FrontierTarget, Role};
+use crate::exploration::Role;
 use crate::groups::DroneGroupPresets;
 use crate::lidar::{gpu::GpuGlobalStats, LidarSettings};
 use crate::maps::{AvailableMaps, MapSwapRequested};
@@ -27,10 +27,7 @@ pub fn draw_ui(
     mut preset_name_buf: Local<String>,
     comms_state: Res<CommsState>,
     camera_mode: Res<CameraMode>,
-    drones_q: Query<
-        (&DroneId, &DroneColor, &Role, &Transform, &FrontierTarget),
-        With<Drone>,
-    >,
+    drones_q: Query<(&DroneId, &DroneColor, &Role), With<Drone>>,
     gpu_stats: Res<GpuGlobalStats>,
     world: Res<WorldConfig>,
     diagnostics: Res<DiagnosticsStore>,
@@ -286,10 +283,7 @@ fn drone_connected(comms: &CommsState, id: u32) -> bool {
 fn draw_drone_telemetry(
     ui: &mut egui::Ui,
     state: &mut UiState,
-    drones_q: &Query<
-        (&DroneId, &DroneColor, &Role, &Transform, &FrontierTarget),
-        With<Drone>,
-    >,
+    drones_q: &Query<(&DroneId, &DroneColor, &Role), With<Drone>>,
     comms: &CommsState,
 ) {
     ui.label("Drones (telemetry)");
@@ -305,12 +299,9 @@ fn draw_drone_telemetry(
         }
     });
 
-    let mut rows: Vec<(u32, Color, Role, f32, Option<u32>)> = drones_q
+    let mut rows: Vec<(u32, Color, Role)> = drones_q
         .iter()
-        .map(|(id, c, role, t, ft)| {
-            let dist = ft.pos.map(|p| p.distance(t.translation)).unwrap_or(0.0);
-            (id.0, c.0, *role, dist, ft.cluster_id)
-        })
+        .map(|(id, c, role)| (id.0, c.0, *role))
         .collect();
     rows.sort_by_key(|(id, ..)| *id);
 
@@ -318,7 +309,7 @@ fn draw_drone_telemetry(
         .max_height(220.0)
         .auto_shrink([false, true])
         .show(ui, |ui| {
-            for (id, color, role, dist, cluster_id) in rows {
+            for (id, color, role) in rows {
                 ui.horizontal(|ui| {
                     let linear = color.to_linear();
                     let swatch = egui::Color32::from_rgb(
@@ -349,15 +340,6 @@ fn draw_drone_telemetry(
                         } else {
                             "isolated"
                         });
-
-                    match cluster_id {
-                        Some(cid) => {
-                            ui.label(format!("→c{} {:.0}m", cid, dist));
-                        }
-                        None => {
-                            ui.label("—");
-                        }
-                    }
                 });
             }
         });
@@ -365,15 +347,12 @@ fn draw_drone_telemetry(
 
 fn draw_roles(
     ui: &mut egui::Ui,
-    drones_q: &Query<
-        (&DroneId, &DroneColor, &Role, &Transform, &FrontierTarget),
-        With<Drone>,
-    >,
+    drones_q: &Query<(&DroneId, &DroneColor, &Role), With<Drone>>,
 ) {
     let mut scouts = 0u32;
     let mut mappers = 0u32;
     let mut anchors = 0u32;
-    for (_, _, role, _, _) in drones_q.iter() {
+    for (_, _, role) in drones_q.iter() {
         match role {
             Role::Scout => scouts += 1,
             Role::Mapper => mappers += 1,

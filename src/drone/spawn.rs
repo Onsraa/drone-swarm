@@ -1,18 +1,13 @@
 use std::f32::consts::TAU;
 
 use bevy::prelude::*;
-use rand::{Rng, RngExt};
 
-use crate::exploration::{
-    FrontierTarget, GhostMemory, LastRoleChange, MovementHealth, Path, Role, RoleParams, Trail,
-};
+use crate::exploration::{GhostMemory, LastRoleChange, Role, RoleParams, Trail};
 use crate::physics::{DesiredVelocity, LinearVelocity, PrevLinvel};
 use crate::world::WorldConfig;
 
-use super::components::{Drone, DroneColor, DroneId, WanderTarget, WanderTimer};
-use super::constants::{
-    DRONE_SPAWN_RADIUS_METERS, RANDOM_DIR_MIN_LENGTH, WANDER_CHANGE_INTERVAL_SECS,
-};
+use super::components::{Drone, DroneColor, DroneId};
+use super::constants::DRONE_SPAWN_RADIUS_METERS;
 use super::resources::{DroneBodyAssets, DroneSpawnConfig};
 
 /// Each frame, if the drone count doesn't match `DroneSpawnConfig.target_count`,
@@ -99,33 +94,22 @@ fn spawn_one_drone(
     color: Color,
     role: Role,
 ) {
-    commands
-        .spawn((
-            Drone,
-            DroneId(id),
-            DroneColor(color),
-            role,
-            LinearVelocity::default(),
-            DesiredVelocity::default(),
-            PrevLinvel::default(),
-            WanderTimer(Timer::from_seconds(
-                WANDER_CHANGE_INTERVAL_SECS,
-                TimerMode::Repeating,
-            )),
-            WanderTarget::default(),
-        ))
-        .insert((
-            FrontierTarget::default(),
-            MovementHealth::default(),
-            Path::default(),
-            Trail::default(),
-            GhostMemory::default(),
-            LastRoleChange::default(),
-            Transform::from_translation(spawn_pos),
-            Visibility::default(),
-            Mesh3d(body.mesh.clone()),
-            MeshMaterial3d(body.material_for(role)),
-        ));
+    commands.spawn((
+        Drone,
+        DroneId(id),
+        DroneColor(color),
+        role,
+        LinearVelocity::default(),
+        DesiredVelocity::default(),
+        PrevLinvel::default(),
+        Trail::default(),
+        GhostMemory::default(),
+        LastRoleChange::default(),
+        Transform::from_translation(spawn_pos),
+        Visibility::default(),
+        Mesh3d(body.mesh.clone()),
+        MeshMaterial3d(body.material_for(role)),
+    ));
 }
 
 /// When the supervisor reassigns a drone's role (e.g. promotes a Scout
@@ -209,16 +193,3 @@ fn role_for_index(id: u32, total: u32) -> Role {
     }
 }
 
-pub fn random_unit_dir(rng: &mut impl Rng) -> Vec3 {
-    loop {
-        let v = Vec3::new(
-            rng.random_range(-1.0..1.0),
-            rng.random_range(-1.0..1.0),
-            rng.random_range(-1.0..1.0),
-        );
-        let len = v.length();
-        if len > RANDOM_DIR_MIN_LENGTH {
-            return v / len;
-        }
-    }
-}

@@ -20,10 +20,9 @@ pub struct RoleParams {
     pub max_range_cells: u32,
     pub rays_per_scan: u32,
     pub scan_interval_frames: u32,
-    pub info_weight: f32,
-    pub distance_weight: f32,
-    pub distance_bias: f32,
-    pub crowding_weight: f32,
+    /// Terrain (lidar-hit) repulsion stiffness for `reactive_force`.
+    /// Peer-peer repulsion uses the pair-wise `peer_repulsion_for`
+    /// table instead so right-of-way can be asymmetric.
     pub avoid_k: f32,
     pub tint: [f32; 4], // linear RGBA before alpha
 }
@@ -32,7 +31,7 @@ pub struct RoleParams {
 /// = "how strongly a drone of role `self` is pushed by a peer of role
 /// `peer`". Asymmetric: Scout barely cares about Mapper bubbles (k=1)
 /// but Mapper yields hard to incoming Scouts (k=28). Anchors don't
-/// move so their value is 0 across the row.
+/// move from peer forces so their value is 0 across the row.
 pub fn peer_repulsion_for(self_role: Role, peer_role: Role) -> f32 {
     match (self_role, peer_role) {
         (Role::Scout, Role::Scout) => 8.0,
@@ -54,53 +53,33 @@ impl RoleParams {
                 max_range_cells: 160,
                 rays_per_scan: 32,
                 scan_interval_frames: 2,
-                info_weight: 1.0,
-                distance_weight: 0.3,
-                distance_bias: 1.0,
-                // 10x the old weight so two scouts targeting the same
-                // cluster see ~half the score versus an empty alternative
-                // of comparable distance. Drives target diversification.
-                crowding_weight: 8.0,
                 avoid_k: 12.0,
                 tint: [1.0, 0.85, 0.2, 0.85],
             },
             Role::Mapper => Self {
-                // Mapper is the thorough scanner: 360° spherical lidar
-                // (half-angle = 180° produces a full sphere in
-                // `fibonacci_cone`), high ray density, scan every
-                // frame. Slower than Scout (~4x) but not stuck.
+                // Slow + thorough: 360° spherical lidar
+                // (half-angle 180° → full sphere in `fibonacci_cone`),
+                // high ray density, every frame. ~4x slower than Scout.
                 cruise_speed_mps: 4.0,
                 cone_half_angle_deg: 180.0,
                 max_range_cells: 64,
                 rays_per_scan: 192,
                 scan_interval_frames: 1,
-                info_weight: 1.5,
-                distance_weight: 1.0,
-                distance_bias: 1.0,
-                crowding_weight: 12.0,
                 avoid_k: 16.0,
                 tint: [0.3, 0.8, 0.35, 0.85],
             },
             Role::Anchor => Self {
-                // Anchor moves but slowly + purposefully: it
-                // repositions to maintain the comms chain back to
-                // base, not to map. The relay algorithm in
-                // `apply_role_steering` decides where; cruise just
-                // sets the speed cap.
+                // Repositions to keep the comms chain back to base
+                // alive; doesn't map. `apply_role_steering`'s anchor
+                // branch handles target selection (ghost memory +
+                // geometric median). `rays_per_scan = 0` so the GPU
+                // lidar shader iterates zero times for anchor; no
+                // contribution to local or central occupancy.
                 cruise_speed_mps: 3.0,
                 cone_half_angle_deg: 180.0,
                 max_range_cells: 128,
-                // Anchor doesn't map. `rays_per_scan = 0` makes the
-                // lidar compute shader iterate zero times for this
-                // role, so anchor's local + central occupancy
-                // contributions are nil. Visually: no lidar rays on
-                // anchors.
                 rays_per_scan: 0,
                 scan_interval_frames: 3,
-                info_weight: 0.0,
-                distance_weight: 0.0,
-                distance_bias: 1.0,
-                crowding_weight: 0.0,
                 avoid_k: 20.0,
                 tint: [0.92, 0.95, 1.0, 0.85],
             },
