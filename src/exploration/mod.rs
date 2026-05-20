@@ -17,46 +17,25 @@ pub use role::{Role, RoleParams};
 pub use supervisor::{LastRoleChange, SupervisorTimer};
 
 use crate::physics::PhysicsSet;
-use systems::{
-    assign_targets, compute_frontier_clusters, draw_path_gizmos, draw_trail_gizmos,
-    enforce_anchor_hover, rebuild_planner_grid, reactive_avoid, replan_paths,
-    sample_trails, steer_along_path, stuck_recovery, update_movement_health,
-};
+use systems::{apply_role_steering, draw_trail_gizmos, sample_trails};
 
 pub struct ExplorationPlugin;
 
 impl Plugin for ExplorationPlugin {
     fn build(&self, app: &mut App) {
+        // FrontierClusters + PlannerGrid resources kept alive for now
+        // even though their producer systems are unwired — they exist
+        // as cosmetic targets for the side-panel HUD and as scaffolding
+        // for the upcoming Phase 4 anchor work. Phase 6 of the
+        // foraging-colony plan deletes them.
         app.init_resource::<FrontierClusters>()
             .init_resource::<PlannerGrid>()
             .insert_resource(SupervisorTimer::new())
             .add_systems(Update, supervisor::supervisor_tick)
             .add_systems(
                 Update,
-                (
-                    rebuild_planner_grid,
-                    compute_frontier_clusters,
-                    assign_targets,
-                    replan_paths,
-                    update_movement_health,
-                    stuck_recovery,
-                )
-                    .chain(),
+                apply_role_steering.before(PhysicsSet::Control),
             )
-            .add_systems(
-                Update,
-                (steer_along_path, reactive_avoid)
-                    .after(replan_paths)
-                    .after(crate::drone::wander)
-                    .before(PhysicsSet::Control),
-            )
-            .add_systems(
-                Update,
-                enforce_anchor_hover
-                    .after(steer_along_path)
-                    .after(reactive_avoid)
-                    .before(PhysicsSet::Control),
-            )
-            .add_systems(Update, (sample_trails, draw_trail_gizmos, draw_path_gizmos));
+            .add_systems(Update, (sample_trails, draw_trail_gizmos));
     }
 }

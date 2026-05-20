@@ -1,10 +1,20 @@
 // src/exploration/systems.rs
+//
+// Transitional state during the Foraging-Colony plan (see
+// docs/.../perfect-ok-so-now-foamy-meerkat.md). `apply_role_steering`
+// at the bottom of the file is the live system; the older
+// `assign_targets` + A* + path-follow chain is unwired but kept around
+// for one or two commits so the diff is reviewable. Phase 6 deletes
+// them.
+#![allow(dead_code, unused_imports)]
+
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 
 use crate::comms::CommsState;
 use crate::drone::{Drone, DroneColor, DroneId};
 use crate::lidar::gpu::GpuGlobalOccupancyMirror;
+use crate::pheromone::PheromoneField;
 use crate::physics::{DesiredVelocity, LinearVelocity};
 
 use super::cluster::build_clusters;
@@ -734,5 +744,139 @@ pub fn draw_path_gizmos(
                 Color::linear_rgba(1.0, 1.0, 1.0, 0.35),
             );
         }
+    }
+}
+
+/// Per-role gradient steering. Replaces the old `assign_targets` +
+/// A* + `pure_pursuit` + `steer_along_path` chain.
+///
+/// Each drone reads the local pheromone gradient and combines it with
+/// per-role rules:
+///
+/// - **Scout** flies down the gradient (toward LOW pheromone). When
+///   there's no gradient yet (cold start, fresh map), falls back to a
+///   radial-out vector from the world center so scouts fan out instead
+///   of piling on the spawn ring.
+/// - **Mapper** flies up the gradient (toward HIGH pheromone). Tracks
+///   scout trails to refine them with its wide-cone scan.
+/// - **Anchor** stays put for now; Phase 4 of the foraging-colony plan
+///   replaces this with a geometric-median relay-positioning algorithm.
+///
+/// Plus a peer separation force (`reactive_force` over peers only) and
+/// a lidar-hit terrain repulsion (`reactive_force` over hits in a small
+/// cube around the drone). Final `desired` is clamped to `1.5×cruise`
+/// so the singular peer-bubble term in `reactive_force` can't shake the
+/// physics tracker.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_role_steering(
+    pheromone: Res<PheromoneField>,
+    mirror: Res<GpuGlobalOccupancyMirror>,
+    world: Res<crate::world::WorldConfig>,
+    mut q_self: Query<(&DroneId, &Transform, &Role, &mut DesiredVelocity), With<Drone>>,
+    q_peers: Query<(&DroneId, &Transform), With<Drone>>,
+    mut hits_buf: Local<Vec<Vec3>>,
+    mut peers_buf: Local<Vec<Vec3>>,
+    mut peer_snap: Local<Vec<(u32, Vec3)>>,
+) {
+    peer_snap.clear();
+    peer_snap.extend(q_peers.iter().map(|(id, t)| (id.0, t.translation)));
+
+    let data = &mirror.data;
+    let dims = world.size;
+    let voxel_size = world.voxel_size;
+    let world_center = world.center();
+    let radius_cells = (AVOID_RADIUS_M / voxel_size).ceil() as i32;
+
+    for (id, transform, role, mut desired) in &mut q_self {
+        let pos = transform.translation;
+        let cruise = RoleParams::for_role(*role).cruise_speed_mps;
+        let avoid_k = RoleParams::for_role(*role).avoid_k;
+
+        // Peer separation — peers always repel regardless of comms.
+        peers_buf.clear();
+        for (pid, p) in peer_snap.iter() {
+            if *pid != id.0 {
+                peers_buf.push(*p);
+            }
+        }
+        let separation = reactive_force(pos, &[], &peers_buf, avoid_k);
+
+        // Terrain repulsion from lidar hits in a small cube around
+        // the drone. Reads the global occupancy mirror (CPU copy of
+        // the GPU bitset). Skips when the mirror hasn't populated yet.
+        hits_buf.clear();
+        if !data.is_empty() {
+            let drone_cell = (pos / voxel_size).floor().as_ivec3();
+            for dz in -radius_cells..=radius_cells {
+                for dy in -radius_cells..=radius_cells {
+                    for dx in -radius_cells..=radius_cells {
+                        let c = drone_cell + IVec3::new(dx, dy, dz);
+                        if c.x < 0 || c.y < 0 || c.z < 0 {
+                            continue;
+                        }
+                        let u = UVec3::new(c.x as u32, c.y as u32, c.z as u32);
+                        if u.x >= dims.x || u.y >= dims.y || u.z >= dims.z {
+                            continue;
+                        }
+                        let flat = u.x + u.y * dims.x + u.z * dims.x * dims.y;
+                        let w = (flat / 16) as usize;
+                        if w >= data.len() {
+                            continue;
+                        }
+                        let b = (flat % 16) * 2;
+                        let state = (data[w] >> b) & 0b11;
+                        if state & 0b10 != 0 {
+                            let wp = Vec3::new(u.x as f32, u.y as f32, u.z as f32)
+                                * voxel_size
+                                + Vec3::splat(voxel_size * 0.5);
+                            hits_buf.push(wp);
+                        }
+                    }
+                }
+            }
+        }
+        let terrain = reactive_force(pos, &hits_buf, &[], avoid_k);
+
+        // Per-role attractor.
+        let role_force = match role {
+            Role::Scout => {
+                let grad = pheromone.gradient_at(pos);
+                let anti = -grad;
+                let dir = anti.normalize_or_zero();
+                if dir == Vec3::ZERO {
+                    // No gradient yet (just spawned, no pheromone
+                    // anywhere). Fall back to a radial-out vector from
+                    // the world center so scouts fan out.
+                    let outward = (pos - world_center).normalize_or_zero();
+                    if outward == Vec3::ZERO {
+                        Vec3::new(1.0, 0.0, 0.0) * cruise
+                    } else {
+                        outward * cruise
+                    }
+                } else {
+                    dir * cruise
+                }
+            }
+            Role::Mapper => {
+                let grad = pheromone.gradient_at(pos);
+                let dir = grad.normalize_or_zero();
+                if dir == Vec3::ZERO {
+                    // No trail to follow yet — hover near spawn until
+                    // a scout lays one down.
+                    Vec3::ZERO
+                } else {
+                    dir * cruise
+                }
+            }
+            Role::Anchor => {
+                // Phase 4 will replace this with the geometric-median
+                // relay-positioning algorithm. For now anchors hover
+                // at their current position.
+                Vec3::ZERO
+            }
+        };
+
+        let total = role_force + separation + terrain;
+        desired.0 = total.clamp_length_max(cruise.max(2.0) * 1.5);
     }
 }

@@ -12,6 +12,7 @@ mod groups;
 mod lidar;
 mod lighting;
 mod maps;
+mod pheromone;
 mod physics;
 mod render;
 mod ui;
@@ -26,6 +27,7 @@ use groups::DroneGroupPresetsPlugin;
 use lidar::{GpuLidarPlugin, LidarPlugin};
 use lighting::LightingPlugin;
 use maps::MapsPlugin;
+use pheromone::PheromonePlugin;
 use physics::PhysicsPlugin;
 use render::VoxelRenderPlugin;
 use ui::UiPlugin;
@@ -52,6 +54,7 @@ fn main() {
         .add_plugins(DronePlugin)
         .add_plugins(LidarPlugin)
         .add_plugins(GpuLidarPlugin)
+        .add_plugins(PheromonePlugin)
         .add_plugins(ExplorationPlugin)
         .add_plugins(CommsPlugin)
         .add_plugins(DroneGroupPresetsPlugin)
