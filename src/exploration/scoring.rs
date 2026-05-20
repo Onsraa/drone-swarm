@@ -25,7 +25,9 @@ impl Default for ScoringWeights {
 
 /// Cost-utility score for one cluster from the perspective of one
 /// drone. Higher is better. `crowding` is a caller-computed count of
-/// nearby peer drones (see `crowding_for`).
+/// peers near the cluster; with the greedy auction in
+/// `assign_targets` this is always 0 because cluster claims are
+/// modeled as a hard score penalty after the fact.
 pub fn score(
     cluster: &FrontierCluster,
     drone_pos: Vec3,
@@ -36,38 +38,6 @@ pub fn score(
     let denom = dist * weights.distance + weights.distance_bias
         + crowding as f32 * weights.crowding;
     cluster.info_gain * weights.info / denom
-}
-
-/// Sum the per-peer crowding contribution against `cluster`:
-/// +1.0 per peer that already targets the same cluster id,
-/// +0.5 per peer whose position is inside an inflated bbox.
-pub fn crowding_for(
-    cluster: &FrontierCluster,
-    peers: &[(Vec3, Option<u32>)],
-    bbox_inflate: f32,
-) -> u32 {
-    let lo = Vec3::new(
-        cluster.bbox_min.x as f32,
-        cluster.bbox_min.y as f32,
-        cluster.bbox_min.z as f32,
-    );
-    let hi = Vec3::new(
-        cluster.bbox_max.x as f32,
-        cluster.bbox_max.y as f32,
-        cluster.bbox_max.z as f32,
-    );
-    let span = (hi - lo) * bbox_inflate;
-    let lo_inf = lo - span * 0.5;
-    let hi_inf = hi + span * 0.5;
-    let mut total: f32 = 0.0;
-    for &(pos, target_id) in peers {
-        if target_id == Some(cluster.id) {
-            total += 1.0;
-        } else if pos.cmpge(lo_inf).all() && pos.cmple(hi_inf).all() {
-            total += 0.5;
-        }
-    }
-    total.round() as u32
 }
 
 #[cfg(test)]

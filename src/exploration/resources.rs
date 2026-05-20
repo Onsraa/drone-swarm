@@ -10,7 +10,12 @@ pub struct FrontierCluster {
     #[allow(dead_code)]
     pub cells: Vec<UVec3>,
     pub info_gain: f32,
+    /// Cluster bbox in cell units. Held for debug overlays / future
+    /// info-gain refinement; the assign_targets auction uses
+    /// `centroid` + greedy claim only.
+    #[allow(dead_code)]
     pub bbox_min: UVec3,
+    #[allow(dead_code)]
     pub bbox_max: UVec3,
 }
 

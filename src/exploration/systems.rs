@@ -23,91 +23,94 @@ const MAX_REPLANS_PER_FRAME: usize = 4;
 use super::planner::{plan, PlanScratch};
 use super::resources::{FrontierClusters, PlannerGrid};
 use super::steering::{pure_pursuit, reactive_force};
-use super::scoring::{crowding_for, score, ScoringWeights};
+use super::scoring::{score, ScoringWeights};
 use super::role::{Role, RoleParams};
 use rand::RngExt;
 
 pub fn assign_targets(
     clusters: Res<FrontierClusters>,
-    comms: Res<CommsState>,
-    mut peers_buf: Local<Vec<(u32, Vec3, Option<u32>)>>,
-    mut visible_buf: Local<Vec<(Vec3, Option<u32>)>>,
+    mut snapshot: Local<Vec<(u32, Vec3, Role, Option<u32>, Option<Vec3>)>>,
     mut scored_buf: Local<Vec<(f32, u32, Vec3)>>,
+    mut claimed: Local<HashSet<u32>>,
+    mut assignments: Local<Vec<(u32, Option<u32>, Option<Vec3>)>>,
     mut q: Query<(&DroneId, &Transform, &Role, &mut FrontierTarget), With<Drone>>,
 ) {
     if clusters.entries.is_empty() {
         return;
     }
-    // Snapshot peer positions + targets keyed by id for crowding lookups.
-    // Role is not needed for peer crowding — only position + cluster_id matter.
-    peers_buf.clear();
-    peers_buf.extend(
-        q.iter()
-            .map(|(id, t, _role, ft)| (id.0, t.translation, ft.cluster_id)),
-    );
 
-    for (id, transform, role, mut target) in &mut q {
-        // Anchors hold position; supervisor assigns them — skip scoring.
-        if *role == Role::Anchor {
+    // Snapshot every drone's state, then sort by id so the auction
+    // assigns clusters deterministically. Scouts and mappers compete
+    // for the same pool; the score per role still pulls each toward
+    // its preferred kind of cluster (Scout = info-heavy + far,
+    // Mapper = crowding-heavy + close). Greedy auction with hard
+    // claim guarantees no two drones target the same cluster
+    // (provided #clusters >= #drones; otherwise late drones share).
+    snapshot.clear();
+    snapshot.extend(q.iter().map(|(id, t, r, ft)| {
+        (id.0, t.translation, *r, ft.cluster_id, ft.pos)
+    }));
+    snapshot.sort_by_key(|(id, ..)| *id);
+
+    claimed.clear();
+    assignments.clear();
+    assignments.reserve(snapshot.len());
+
+    for (id, drone_pos, role, cur_id, cur_pos) in snapshot.iter().copied() {
+        if role == Role::Anchor {
+            // Anchors hold position; supervisor pipeline owns their
+            // target. Preserve whatever target they had.
+            assignments.push((id, cur_id, cur_pos));
+            if let Some(c) = cur_id {
+                claimed.insert(c);
+            }
             continue;
         }
 
-        let role_params = RoleParams::for_role(*role);
+        let role_params = RoleParams::for_role(role);
         let weights = ScoringWeights {
             info: role_params.info_weight,
             distance: role_params.distance_weight,
             distance_bias: role_params.distance_bias,
             crowding: role_params.crowding_weight,
         };
-        let drone_pos = transform.translation;
-        // Filter peers to the comms cluster of the deciding drone.
-        let half = (id.0 >= 32) as usize;
-        let i_am_connected = (comms.connected_mask[half] >> (id.0 % 32)) & 1 == 1;
-        visible_buf.clear();
-        if i_am_connected {
-            visible_buf.extend(peers_buf.iter().filter_map(|(pid, p, t)| {
-                if *pid == id.0 {
-                    return None;
-                }
-                let h = (*pid >= 32) as usize;
-                if (comms.connected_mask[h] >> (pid % 32)) & 1 == 1 {
-                    Some((*p, *t))
-                } else {
-                    None
-                }
-            }));
-        }
 
-        // Score all clusters once.
+        // Score all clusters. Crowding-from-peer-position now comes
+        // for free from the claim set: a cluster already taken by an
+        // earlier drone in the auction gets a hard 90% score penalty,
+        // which beats out the cost-utility math for anything but the
+        // most lopsided cluster.
         scored_buf.clear();
         scored_buf.extend(clusters.entries.iter().map(|c| {
-            let crowding = crowding_for(c, &visible_buf, 0.5);
-            (score(c, drone_pos, crowding, &weights), c.id, c.centroid)
+            let base = score(c, drone_pos, 0, &weights);
+            let s = if claimed.contains(&c.id) { base * 0.1 } else { base };
+            (s, c.id, c.centroid)
         }));
 
         let best = scored_buf
             .iter()
             .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
         let Some(&(best_score, best_id, best_centroid)) = best else {
-            target.pos = None;
-            target.cluster_id = None;
+            assignments.push((id, None, None));
             continue;
         };
 
-        // Stickiness: keep current unless reached, vanished, or upgrade by 1.5x.
-        let keep = match target.cluster_id {
+        // Stickiness: keep current target unless reached, vanished,
+        // or an UNCLAIMED cluster scores ≥ 1.5x the current one.
+        let keep = match cur_id {
             None => false,
-            Some(cur_id) => {
-                let cur_alive = clusters.entries.iter().any(|c| c.id == cur_id);
+            Some(cur) => {
+                let cur_alive = clusters.entries.iter().any(|c| c.id == cur);
                 if !cur_alive {
                     false
-                } else if let Some(cur_pos) = target.pos {
-                    if cur_pos.distance(drone_pos) < FRONTIER_REACHED_DIST {
+                } else if let Some(cp) = cur_pos {
+                    if cp.distance(drone_pos) < FRONTIER_REACHED_DIST {
                         false
                     } else {
                         let cur_score = scored_buf
                             .iter()
-                            .find(|(_, id, _)| *id == cur_id)
+                            .find(|(_, cid, _)| *cid == cur)
                             .map(|s| s.0)
                             .unwrap_or(0.0);
                         best_score <= cur_score * SCORE_UPGRADE_RATIO
@@ -117,9 +120,29 @@ pub fn assign_targets(
                 }
             }
         };
-        if !keep {
-            target.cluster_id = Some(best_id);
-            target.pos = Some(best_centroid);
+        if keep {
+            assignments.push((id, cur_id, cur_pos));
+            if let Some(c) = cur_id {
+                claimed.insert(c);
+            }
+        } else {
+            assignments.push((id, Some(best_id), Some(best_centroid)));
+            claimed.insert(best_id);
+        }
+    }
+
+    // Apply assignments — only write `FrontierTarget` when it
+    // actually changed, to avoid burning a change-detection tick
+    // every frame and re-firing replan_paths.
+    for (id, _t, _r, mut target) in &mut q {
+        let Some(&(_, new_id, new_pos)) =
+            assignments.iter().find(|(aid, _, _)| *aid == id.0)
+        else {
+            continue;
+        };
+        if target.cluster_id != new_id || target.pos != new_pos {
+            target.cluster_id = new_id;
+            target.pos = new_pos;
         }
     }
 }
@@ -602,7 +625,13 @@ pub fn reactive_avoid(
         }
         let avoid_k = RoleParams::for_role(*role).avoid_k;
         let force = reactive_force(pos, &hits_buf, &peers_buf, avoid_k);
-        desired.0 += force;
+        // Cap the combined steering + avoidance command so that a
+        // near-singular peer-bubble repulsion can't shoot the lerp
+        // tracker past its stable rate. `cruise * 1.5` is plenty to
+        // sidestep a peer at a brisk pace.
+        let cruise = RoleParams::for_role(*role).cruise_speed_mps;
+        let max_mag = (cruise * 1.5).max(2.0);
+        desired.0 = (desired.0 + force).clamp_length_max(max_mag);
     }
 }
 
