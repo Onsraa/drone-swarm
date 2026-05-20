@@ -12,11 +12,11 @@ use bevy::render::render_resource::{
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::storage::GpuShaderStorageBuffer;
 
-use super::dispatch::ComputeLidarNodeLabel;
+use super::prepare_indirect::PrepareBuildIndirectNodeLabel;
 use super::resources::{
-    BuildLocalParams, BuildLocalParamsBuffer, DroneColorsBuffer, LocalActiveCellsBuffer,
-    LocalActiveCountBuffer, LocalInstanceCountBuffer, LocalInstanceVecBuffer,
-    MAX_LOCAL_ACTIVE_PER_DRONE,
+    BuildIndirectBuffer, BuildLocalParams, BuildLocalParamsBuffer, DroneColorsBuffer,
+    LocalActiveCellsBuffer, LocalActiveCountBuffer, LocalInstanceCountBuffer,
+    LocalInstanceVecBuffer,
 };
 
 const SHADER_ASSET_PATH: &str = "shaders/build_local_instances.wgsl";
@@ -143,25 +143,27 @@ impl render_graph::Node for BuildLocalNode {
         let Some(compute_pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) else {
             return Ok(());
         };
-        // Dispatch sized to the per-drone active-cell list cap, not the
-        // whole world. Each thread reads its slot from the list +
-        // emits an instance (atomically reserving a slot in the
-        // instance buffer). Threads with slot >= live count early-
-        // return; GPU handles that cheaply. 50 drones × 200 K slots /
-        // 256 = 39 K workgroups vs the old 1.92 M workgroups.
-        let groups_x = MAX_LOCAL_ACTIVE_PER_DRONE.div_ceil(256);
-        let groups_y = super::resources::MAX_DRONES_GPU;
+        let Some(indirect_handle) = world.get_resource::<BuildIndirectBuffer>() else {
+            return Ok(());
+        };
+        let Some(indirect_buf) = buffers.get(&indirect_handle.0) else {
+            return Ok(());
+        };
 
         let encoder = render_context.command_encoder();
         encoder.clear_buffer(&count_buf.buffer, 0, None);
         {
+            // Indirect dispatch: shape (max_active_count / 256,
+            // MAX_DRONES, 1) is computed each frame by
+            // `prepare_build_indirect` from per-drone active counts.
+            // Slot 0 in the indirect buffer is build_local's args.
             let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                 label: Some("build local instances pass"),
                 ..default()
             });
             pass.set_bind_group(0, &bind_group.0, &[]);
             pass.set_pipeline(compute_pipeline);
-            pass.dispatch_workgroups(groups_x, groups_y, 1);
+            pass.dispatch_workgroups_indirect(&indirect_buf.buffer, 0);
         }
         Ok(())
     }
@@ -169,7 +171,9 @@ impl render_graph::Node for BuildLocalNode {
 
 pub fn add_build_local_render_graph_node(mut render_graph: ResMut<RenderGraph>) {
     render_graph.add_node(BuildLocalNodeLabel, BuildLocalNode);
-    // Ensure the build pass runs after the lidar pass so the occupancy
-    // SSBO already reflects this frame's hits before we sweep over it.
-    render_graph.add_node_edge(ComputeLidarNodeLabel, BuildLocalNodeLabel);
+    // build_local reads the indirect args buffer written by
+    // `prepare_build_indirect`, which itself runs after lidar_compute.
+    // Single edge here is enough — the transitive ordering is covered
+    // by prepare's own edge.
+    render_graph.add_node_edge(PrepareBuildIndirectNodeLabel, BuildLocalNodeLabel);
 }

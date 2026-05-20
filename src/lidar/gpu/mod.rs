@@ -3,16 +3,17 @@ mod build_pass;
 mod dispatch;
 mod per_drone_scan;
 mod pipeline;
+mod prepare_indirect;
 mod resources;
 
 pub use per_drone_scan::{DroneScanParams, DroneScanParamsBuffer};
 pub use resources::{
-    BuildLocalParamsBuffer, DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer,
-    GlobalActiveCellsBuffer, GlobalActiveCountBuffer, GlobalInstanceCountBuffer,
-    GlobalInstanceVecBuffer, GlobalOccupancyBuffer, GroundTruthBuffer, LidarParamsBuffer,
-    LidarPointCountBuffer, LidarPointVecBuffer, LocalActiveCellsBuffer, LocalActiveCountBuffer,
-    LocalInstanceCountBuffer, LocalInstanceVecBuffer, LocalOccupancyBuffer, RayDirsBuffer,
-    RoleConeRanges,
+    BuildIndirectBuffer, BuildLocalParamsBuffer, DroneColorsBuffer, DroneOrientationsBuffer,
+    DronePositionsBuffer, GlobalActiveCellsBuffer, GlobalActiveCountBuffer,
+    GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, GlobalOccupancyBuffer, GroundTruthBuffer,
+    LidarParamsBuffer, LidarPointCountBuffer, LidarPointVecBuffer, LocalActiveCellsBuffer,
+    LocalActiveCountBuffer, LocalInstanceCountBuffer, LocalInstanceVecBuffer, LocalOccupancyBuffer,
+    RayDirsBuffer, RoleConeRanges,
 };
 
 use bevy::prelude::*;
@@ -37,6 +38,10 @@ use build_pass::{
 };
 use dispatch::{add_compute_render_graph_node, prepare_lidar_bind_group};
 use pipeline::init_compute_lidar_pipeline;
+use prepare_indirect::{
+    add_prepare_build_indirect_render_graph_node, init_prepare_build_indirect_pipeline,
+    prepare_build_indirect_bind_group,
+};
 use resources::{
     setup_gpu_lidar_assets, BuildLocalParams, LidarParams, MAX_DRONES_GPU, MAX_LIDAR_POINTS,
     MAX_LOCAL_INSTANCES,
@@ -95,6 +100,7 @@ impl Plugin for GpuLidarPlugin {
             .add_plugins(ExtractResourcePlugin::<LocalActiveCountBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<GlobalActiveCellsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<GlobalActiveCountBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<BuildIndirectBuffer>::default())
             .add_systems(
                 Update,
                 (
@@ -123,14 +129,18 @@ impl Plugin for GpuLidarPlugin {
                     add_compute_render_graph_node,
                     init_build_local_pipeline,
                     init_build_global_pipeline,
-                    // Edges: lidar -> {build_local, build_global}. The
-                    // old merge_global pass is gone — lidar now writes
-                    // directly into global_occupancy with a comms-mask
-                    // gate, so build_global can run straight after.
+                    init_prepare_build_indirect_pipeline,
+                    // Edges: lidar -> prepare_build_indirect ->
+                    // {build_local, build_global}. The prepare pass
+                    // reads the per-drone + global active-cell counts
+                    // and writes one shared indirect args buffer that
+                    // both build passes dispatch from.
+                    add_prepare_build_indirect_render_graph_node
+                        .after(add_compute_render_graph_node),
                     add_build_local_render_graph_node
-                        .after(add_compute_render_graph_node),
+                        .after(add_prepare_build_indirect_render_graph_node),
                     add_build_global_render_graph_node
-                        .after(add_compute_render_graph_node),
+                        .after(add_prepare_build_indirect_render_graph_node),
                 ),
             )
             // `set_data` each frame re-prepares the storage buffers as
@@ -147,6 +157,10 @@ impl Plugin for GpuLidarPlugin {
             .add_systems(
                 Render,
                 prepare_build_global_bind_group.in_set(RenderSystems::PrepareBindGroups),
+            )
+            .add_systems(
+                Render,
+                prepare_build_indirect_bind_group.in_set(RenderSystems::PrepareBindGroups),
             );
     }
 }

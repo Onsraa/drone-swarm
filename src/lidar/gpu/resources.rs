@@ -153,6 +153,16 @@ pub struct GlobalActiveCellsBuffer(pub Handle<ShaderStorageBuffer>);
 #[derive(Resource, ExtractResource, Clone)]
 pub struct GlobalActiveCountBuffer(pub Handle<ShaderStorageBuffer>);
 
+/// One indirect dispatch args block per build pass. Layout is the wgpu
+/// `DispatchIndirectArgs` triple (x, y, z) plus a u32 pad to keep it
+/// 16-byte aligned. Slot 0 = build_local, slot 1 = build_global. The
+/// `prepare_build_indirect` compute pass writes `x =
+/// ceil(max(active_count) / 256)` into each slot every frame; both
+/// build passes then `dispatch_workgroups_indirect` from this same
+/// buffer. Total size 32 bytes.
+#[derive(Resource, ExtractResource, Clone)]
+pub struct BuildIndirectBuffer(pub Handle<ShaderStorageBuffer>);
+
 /// One-shot startup: packs the CPU ground truth and allocates every
 /// lidar input/output buffer. Positions and params start zeroed; the
 /// per-frame `upload_drone_positions` system fills them with real data.
@@ -297,6 +307,14 @@ pub fn setup_gpu_lidar_assets(
         BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
     let global_active_count_handle = buffers.add(global_active_count_buf);
 
+    // 2 slots × (x, y, z, _pad) u32 = 8 u32 = 32 bytes. Slot 0 =
+    // build_local args, slot 1 = build_global args. INDIRECT usage
+    // so both build passes can dispatch_workgroups_indirect from it.
+    let mut build_indirect_buf = ShaderStorageBuffer::from(vec![0u32; 8]);
+    build_indirect_buf.buffer_description.usage |=
+        BufferUsages::COPY_SRC | BufferUsages::COPY_DST | BufferUsages::INDIRECT;
+    let build_indirect_handle = buffers.add(build_indirect_buf);
+
     info!(
         "GPU lidar buffers allocated: {} drone slots, {} rays/scan, {} steps/ray, {} occupancy u32s ({} words/drone)",
         MAX_DRONES_GPU,
@@ -326,5 +344,6 @@ pub fn setup_gpu_lidar_assets(
     commands.insert_resource(LocalActiveCountBuffer(local_active_count_handle));
     commands.insert_resource(GlobalActiveCellsBuffer(global_active_handle));
     commands.insert_resource(GlobalActiveCountBuffer(global_active_count_handle));
+    commands.insert_resource(BuildIndirectBuffer(build_indirect_handle));
     commands.insert_resource(RoleConeRanges(role_ranges));
 }

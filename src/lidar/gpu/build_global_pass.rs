@@ -12,10 +12,10 @@ use bevy::render::render_resource::{
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::storage::GpuShaderStorageBuffer;
 
-use super::dispatch::ComputeLidarNodeLabel;
+use super::prepare_indirect::PrepareBuildIndirectNodeLabel;
 use super::resources::{
-    BuildLocalParams, BuildLocalParamsBuffer, GlobalActiveCellsBuffer, GlobalActiveCountBuffer,
-    GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, MAX_GLOBAL_ACTIVE,
+    BuildIndirectBuffer, BuildLocalParams, BuildLocalParamsBuffer, GlobalActiveCellsBuffer,
+    GlobalActiveCountBuffer, GlobalInstanceCountBuffer, GlobalInstanceVecBuffer,
 };
 
 const SHADER_ASSET_PATH: &str = "shaders/build_global_instances.wgsl";
@@ -136,20 +136,25 @@ impl render_graph::Node for BuildGlobalNode {
         let Some(compute_pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) else {
             return Ok(());
         };
-        // Dispatch over the global active-cell list cap, not every
-        // cell in the world. Threads past the live count early-return.
-        let groups_x = MAX_GLOBAL_ACTIVE.div_ceil(256);
+        let Some(indirect_handle) = world.get_resource::<BuildIndirectBuffer>() else {
+            return Ok(());
+        };
+        let Some(indirect_buf) = buffers.get(&indirect_handle.0) else {
+            return Ok(());
+        };
 
         let encoder = render_context.command_encoder();
         encoder.clear_buffer(&count_buf.buffer, 0, None);
         {
+            // Indirect dispatch from slot 1 of the shared indirect
+            // buffer (offset 16 bytes): (global_active_count / 256, 1, 1).
             let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                 label: Some("build global instances pass"),
                 ..default()
             });
             pass.set_bind_group(0, &bind_group.0, &[]);
             pass.set_pipeline(compute_pipeline);
-            pass.dispatch_workgroups(groups_x, 1, 1);
+            pass.dispatch_workgroups_indirect(&indirect_buf.buffer, 16);
         }
         Ok(())
     }
@@ -157,8 +162,7 @@ impl render_graph::Node for BuildGlobalNode {
 
 pub fn add_build_global_render_graph_node(mut render_graph: ResMut<RenderGraph>) {
     render_graph.add_node(BuildGlobalNodeLabel, BuildGlobalNode);
-    // lidar -> build_global: lidar writes global_occupancy inline now
-    // (no merge_global pass), so build_global only needs to run after
-    // the lidar compute node.
-    render_graph.add_node_edge(ComputeLidarNodeLabel, BuildGlobalNodeLabel);
+    // build_global reads slot 1 of the indirect args buffer written by
+    // `prepare_build_indirect`, which itself runs after lidar_compute.
+    render_graph.add_node_edge(PrepareBuildIndirectNodeLabel, BuildGlobalNodeLabel);
 }
