@@ -14,7 +14,7 @@ use crate::physics::DesiredVelocity;
 use crate::sensors::DetectorHits;
 
 use super::components::{GhostMemory, GhostPeer, Trail};
-use super::constants::{TRAIL_MAX_POINTS, TRAIL_SAMPLE_INTERVAL_SECS};
+use super::constants::{PEER_BUBBLE_RADIUS_M, TRAIL_MAX_POINTS, TRAIL_SAMPLE_INTERVAL_SECS};
 use super::role::{peer_repulsion_for, Role, RoleParams};
 use super::steering::{reactive_force, reactive_force_peers};
 
@@ -212,6 +212,34 @@ pub fn apply_role_steering(
                 }
             }
         };
+
+        // Wall-slide: for each close detector hit, strip the component
+        // of `role_force` that points INTO the wall. Net effect — the
+        // drone keeps its tangential intent (slides along the wall)
+        // instead of being braked head-on. Only consider hits within
+        // `PEER_BUBBLE_RADIUS_M` so distant walls don't constrain
+        // long-range planning.
+        let mut role_force = role_force;
+        for (i, ep) in detector.endpoints.iter().enumerate() {
+            if !detector.is_hit.get(i).copied().unwrap_or(false) {
+                continue;
+            }
+            let to_drone = pos - *ep;
+            let d = to_drone.length();
+            if d < 1e-3 || d > PEER_BUBBLE_RADIUS_M {
+                continue;
+            }
+            let n = to_drone / d;
+            let inward = role_force.dot(n);
+            if inward < 0.0 {
+                role_force -= n * inward;
+            }
+        }
+
+        // Cap terrain magnitude so even if projection misses something
+        // (rare edge case — multiple obstacles, weird normals), the
+        // role force can still overpower and squirt the drone past.
+        let terrain = terrain.clamp_length_max(cruise * 0.8);
 
         let role_capped = role_force.clamp_length_max(cruise);
         let avoid_cap = (cruise * 1.5).max(2.0);

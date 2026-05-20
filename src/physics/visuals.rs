@@ -64,11 +64,13 @@ pub fn update_drone_visuals(
                 * Quat::from_rotation_x(pitch)
                 * Quat::from_rotation_z(roll)
         } else {
-            // Below the minimum speed, keep current yaw but level out
-            // pitch + roll. Decompose current rotation to extract yaw
-            // only.
-            let (yaw, _, _) = transform.rotation.to_euler(EulerRot::YXZ);
-            Quat::from_rotation_y(yaw)
+            // Below the minimum speed, hold the current orientation
+            // verbatim. The previous fallback decomposed `rotation` via
+            // `to_euler(YXZ)`, but that's not gimbal-stable when the
+            // rotation has any pitch or roll — the extracted yaw drifts
+            // frame-to-frame and the slerp chases it forever. Holding
+            // the rotation makes the slerp a no-op.
+            transform.rotation
         };
 
         transform.rotation = transform.rotation.slerp(target_rot, alpha);

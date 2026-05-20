@@ -1,7 +1,9 @@
-/// Cool muted grey for the transparent ground-truth voxel cubes. Alpha
-/// is low so the local + global map billboard dots underneath read
-/// through as "paint" inside the cube volume.
-pub const GROUND_TRUTH_CUBE_COLOR: [f32; 4] = [0.55, 0.58, 0.65, 0.18];
+/// Cool muted grey for the ground-truth voxel cubes. Opaque (alpha 1.0)
+/// so the world reads solid. Local + global map dots still paint on top
+/// because the cube pipeline keeps `depth_write_enabled = false` — they
+/// render in the Transparent3d phase after the cubes write color but
+/// not depth.
+pub const GROUND_TRUTH_CUBE_COLOR: [f32; 4] = [0.55, 0.58, 0.65, 1.0];
 
 /// Multiplier on the drone's own color for the local-map instance color
 /// (lower = more saturated drone hue, higher = brighter glow).
