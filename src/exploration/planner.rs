@@ -160,13 +160,29 @@ fn heuristic(a: UVec3, b: UVec3) -> f32 {
     (dx * dx + dy * dy + dz * dz).sqrt()
 }
 
+/// Reusable scratch buffers for `plan`. Held by the caller in a
+/// `Local<PlanScratch>` so each replan reuses the same allocation
+/// instead of pushing two 76 KB Vecs and a heap onto the allocator
+/// 4× per frame.
+#[derive(Default)]
+pub struct PlanScratch {
+    g_score: Vec<f32>,
+    came_from: Vec<u32>,
+    open: BinaryHeap<Node>,
+}
+
 /// A* on the coarse planner grid. Returns the sequence of coarse cells
 /// from `start` to `goal` inclusive, or `None` if unreachable.
 ///
 /// Uses flat `Vec<f32>` + `Vec<u32>` indexed by `grid.idx(cell)` instead
 /// of hash maps. PlannerGrid is dense (~19 K nodes at 640³/8³); flat
 /// arrays are 50–200× faster than HashMap probes for this size.
-pub fn plan(grid: &PlannerGrid, start: UVec3, goal: UVec3) -> Option<Vec<UVec3>> {
+pub fn plan(
+    grid: &PlannerGrid,
+    start: UVec3,
+    goal: UVec3,
+    scratch: &mut PlanScratch,
+) -> Option<Vec<UVec3>> {
     let Some(start_idx) = grid.idx(start) else { return None; };
     let Some(goal_idx) = grid.idx(goal) else { return None; };
     if matches!(grid.at(goal), CoarseCell::Blocked) {
@@ -187,31 +203,33 @@ pub fn plan(grid: &PlannerGrid, start: UVec3, goal: UVec3) -> Option<Vec<UVec3>>
         UVec3::new(x, y, z)
     };
 
-    let mut g_score: Vec<f32> = vec![f32::INFINITY; n];
-    let mut came_from: Vec<u32> = vec![NONE_IDX; n];
-    let mut open = BinaryHeap::new();
-    g_score[start_idx as usize] = 0.0;
-    open.push(Node {
+    scratch.g_score.clear();
+    scratch.g_score.resize(n, f32::INFINITY);
+    scratch.came_from.clear();
+    scratch.came_from.resize(n, NONE_IDX);
+    scratch.open.clear();
+    scratch.g_score[start_idx as usize] = 0.0;
+    scratch.open.push(Node {
         idx: start_idx,
         f: heuristic(start, goal),
     });
 
     let neighbors = neighbors_26();
 
-    while let Some(Node { idx, .. }) = open.pop() {
+    while let Some(Node { idx, .. }) = scratch.open.pop() {
         if idx == goal_idx {
             // Reconstruct via came_from.
             let mut path = Vec::with_capacity(16);
             path.push(goal);
             let mut cur = goal_idx;
-            while came_from[cur as usize] != NONE_IDX {
-                cur = came_from[cur as usize];
+            while scratch.came_from[cur as usize] != NONE_IDX {
+                cur = scratch.came_from[cur as usize];
                 path.push(cell_of(cur));
             }
             path.reverse();
             return Some(path);
         }
-        let g_cur = g_score[idx as usize];
+        let g_cur = scratch.g_score[idx as usize];
         let cell = cell_of(idx);
         let from_state = grid.coarse[idx as usize];
         for d in &neighbors {
@@ -235,11 +253,11 @@ pub fn plan(grid: &PlannerGrid, start: UVec3, goal: UVec3) -> Option<Vec<UVec3>>
                 continue;
             };
             let tentative = g_cur + cost;
-            if tentative < g_score[next_idx as usize] {
-                came_from[next_idx as usize] = idx;
-                g_score[next_idx as usize] = tentative;
+            if tentative < scratch.g_score[next_idx as usize] {
+                scratch.came_from[next_idx as usize] = idx;
+                scratch.g_score[next_idx as usize] = tentative;
                 let f = tentative + heuristic(next, goal);
-                open.push(Node { idx: next_idx, f });
+                scratch.open.push(Node { idx: next_idx, f });
             }
         }
     }
@@ -320,7 +338,7 @@ mod tests {
             voxel_size: 1.0,
             downsample: 1,
         };
-        let path = plan(&grid, UVec3::new(0, 0, 0), UVec3::new(3, 0, 3)).unwrap();
+        let path = plan(&grid, UVec3::new(0, 0, 0), UVec3::new(3, 0, 3), &mut PlanScratch::default()).unwrap();
         assert!(path.first() == Some(&UVec3::new(0, 0, 0)));
         assert!(path.last() == Some(&UVec3::new(3, 0, 3)));
         assert!(path.len() <= 4);
@@ -340,7 +358,7 @@ mod tests {
             voxel_size: 1.0,
             downsample: 1,
         };
-        let path = plan(&grid, UVec3::new(0, 0, 0), UVec3::new(4, 0, 0)).unwrap();
+        let path = plan(&grid, UVec3::new(0, 0, 0), UVec3::new(4, 0, 0), &mut PlanScratch::default()).unwrap();
         // Must detour through z=4 row.
         assert!(path.iter().any(|c| c.z == 4));
     }
@@ -361,7 +379,7 @@ mod tests {
             voxel_size: 1.0,
             downsample: 1,
         };
-        let path = plan(&grid, UVec3::new(0, 0, 0), UVec3::new(2, 0, 0)).unwrap();
+        let path = plan(&grid, UVec3::new(0, 0, 0), UVec3::new(2, 0, 0), &mut PlanScratch::default()).unwrap();
         // Direct-through-Unknown route would touch (1, 0, 0). Prefer detour via z=1.
         assert!(!path.contains(&UVec3::new(1, 0, 0)));
     }
@@ -377,6 +395,6 @@ mod tests {
             voxel_size: 1.0,
             downsample: 1,
         };
-        assert!(plan(&grid, UVec3::new(0, 0, 0), UVec3::new(2, 0, 0)).is_none());
+        assert!(plan(&grid, UVec3::new(0, 0, 0), UVec3::new(2, 0, 0), &mut PlanScratch::default()).is_none());
     }
 }

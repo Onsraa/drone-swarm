@@ -161,13 +161,12 @@ fn upload_drone_state(
     ui_state: Res<crate::ui::UiState>,
     settings: Res<LidarSettings>,
     comms: Res<CommsState>,
+    mut sorted: Local<Vec<(u32, Vec3, Quat)>>,
     drones: Query<(&DroneId, &Transform), With<Drone>>,
 ) {
     let voxel_size = config.voxel_size;
-    let mut sorted: Vec<(u32, Vec3, Quat)> = drones
-        .iter()
-        .map(|(id, t)| (id.0, t.translation, t.rotation))
-        .collect();
+    sorted.clear();
+    sorted.extend(drones.iter().map(|(id, t)| (id.0, t.translation, t.rotation)));
     sorted.sort_by_key(|(id, _, _)| *id);
 
     let max = MAX_DRONES_GPU as usize;
@@ -251,23 +250,22 @@ fn upload_build_params_and_colors(
     config: Res<WorldConfig>,
     ui_state: Res<crate::ui::UiState>,
     comms: Res<CommsState>,
+    mut sorted: Local<Vec<(u32, Vec4)>>,
     drones: Query<(&DroneId, &DroneColor), With<Drone>>,
 ) {
-    let mut sorted: Vec<(u32, Vec4)> = drones
-        .iter()
-        .map(|(id, color)| {
-            let linear = color.0.to_linear();
-            (
-                id.0,
-                Vec4::new(
-                    (linear.red * crate::render::constants::LOCAL_MAP_COLOR_FACTOR).min(1.0),
-                    (linear.green * crate::render::constants::LOCAL_MAP_COLOR_FACTOR).min(1.0),
-                    (linear.blue * crate::render::constants::LOCAL_MAP_COLOR_FACTOR).min(1.0),
-                    crate::render::constants::LOCAL_MAP_ALPHA,
-                ),
-            )
-        })
-        .collect();
+    sorted.clear();
+    sorted.extend(drones.iter().map(|(id, color)| {
+        let linear = color.0.to_linear();
+        (
+            id.0,
+            Vec4::new(
+                (linear.red * crate::render::constants::LOCAL_MAP_COLOR_FACTOR).min(1.0),
+                (linear.green * crate::render::constants::LOCAL_MAP_COLOR_FACTOR).min(1.0),
+                (linear.blue * crate::render::constants::LOCAL_MAP_COLOR_FACTOR).min(1.0),
+                crate::render::constants::LOCAL_MAP_ALPHA,
+            ),
+        )
+    }));
     sorted.sort_by_key(|(id, _)| *id);
 
     let max = MAX_DRONES_GPU as usize;
@@ -312,9 +310,11 @@ fn upload_drone_scan_params(
     mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
     handle: Res<DroneScanParamsBuffer>,
     ranges: Res<RoleConeRanges>,
+    mut sorted: Local<Vec<(u32, Role)>>,
     drones: Query<(&DroneId, &Role), With<Drone>>,
 ) {
-    let mut sorted: Vec<(u32, Role)> = drones.iter().map(|(id, r)| (id.0, *r)).collect();
+    sorted.clear();
+    sorted.extend(drones.iter().map(|(id, r)| (id.0, *r)));
     sorted.sort_by_key(|(id, _)| *id);
     let max = MAX_DRONES_GPU as usize;
     let mut out = vec![DroneScanParams::default(); max];

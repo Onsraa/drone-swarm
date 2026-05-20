@@ -20,7 +20,7 @@ use super::constants::{
 /// a map swap when every drone simultaneously gets a fresh target).
 /// Remaining drones get their replan on the next frame.
 const MAX_REPLANS_PER_FRAME: usize = 4;
-use super::planner::plan;
+use super::planner::{plan, PlanScratch};
 use super::resources::{FrontierClusters, PlannerGrid};
 use super::steering::{pure_pursuit, reactive_force};
 use super::scoring::{crowding_for, score, ScoringWeights};
@@ -30,6 +30,9 @@ use rand::RngExt;
 pub fn assign_targets(
     clusters: Res<FrontierClusters>,
     comms: Res<CommsState>,
+    mut peers_buf: Local<Vec<(u32, Vec3, Option<u32>)>>,
+    mut visible_buf: Local<Vec<(Vec3, Option<u32>)>>,
+    mut scored_buf: Local<Vec<(f32, u32, Vec3)>>,
     mut q: Query<(&DroneId, &Transform, &Role, &mut FrontierTarget), With<Drone>>,
 ) {
     if clusters.entries.is_empty() {
@@ -37,10 +40,11 @@ pub fn assign_targets(
     }
     // Snapshot peer positions + targets keyed by id for crowding lookups.
     // Role is not needed for peer crowding — only position + cluster_id matter.
-    let peers: Vec<(u32, Vec3, Option<u32>)> = q
-        .iter()
-        .map(|(id, t, _role, ft)| (id.0, t.translation, ft.cluster_id))
-        .collect();
+    peers_buf.clear();
+    peers_buf.extend(
+        q.iter()
+            .map(|(id, t, _role, ft)| (id.0, t.translation, ft.cluster_id)),
+    );
 
     for (id, transform, role, mut target) in &mut q {
         // Anchors hold position; supervisor assigns them — skip scoring.
@@ -59,33 +63,29 @@ pub fn assign_targets(
         // Filter peers to the comms cluster of the deciding drone.
         let half = (id.0 >= 32) as usize;
         let i_am_connected = (comms.connected_mask[half] >> (id.0 % 32)) & 1 == 1;
-        let visible_peers: Vec<(Vec3, Option<u32>)> = if i_am_connected {
-            peers
-                .iter()
-                .filter(|(pid, _, _)| {
-                    if *pid == id.0 {
-                        return false;
-                    }
-                    let h = (*pid >= 32) as usize;
-                    (comms.connected_mask[h] >> (pid % 32)) & 1 == 1
-                })
-                .map(|(_, p, t)| (*p, *t))
-                .collect()
-        } else {
-            Vec::new()
-        };
+        visible_buf.clear();
+        if i_am_connected {
+            visible_buf.extend(peers_buf.iter().filter_map(|(pid, p, t)| {
+                if *pid == id.0 {
+                    return None;
+                }
+                let h = (*pid >= 32) as usize;
+                if (comms.connected_mask[h] >> (pid % 32)) & 1 == 1 {
+                    Some((*p, *t))
+                } else {
+                    None
+                }
+            }));
+        }
 
         // Score all clusters once.
-        let scored: Vec<(f32, u32, Vec3)> = clusters
-            .entries
-            .iter()
-            .map(|c| {
-                let crowding = crowding_for(c, &visible_peers, 0.5);
-                (score(c, drone_pos, crowding, &weights), c.id, c.centroid)
-            })
-            .collect();
+        scored_buf.clear();
+        scored_buf.extend(clusters.entries.iter().map(|c| {
+            let crowding = crowding_for(c, &visible_buf, 0.5);
+            (score(c, drone_pos, crowding, &weights), c.id, c.centroid)
+        }));
 
-        let best = scored
+        let best = scored_buf
             .iter()
             .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
         let Some(&(best_score, best_id, best_centroid)) = best else {
@@ -105,7 +105,7 @@ pub fn assign_targets(
                     if cur_pos.distance(drone_pos) < FRONTIER_REACHED_DIST {
                         false
                     } else {
-                        let cur_score = scored
+                        let cur_score = scored_buf
                             .iter()
                             .find(|(_, id, _)| *id == cur_id)
                             .map(|s| s.0)
@@ -364,6 +364,7 @@ pub fn compute_frontier_clusters(
 
 pub fn replan_paths(
     grid: Res<PlannerGrid>,
+    mut scratch: Local<PlanScratch>,
     mut q: Query<(&Transform, Ref<FrontierTarget>, &mut Path), With<Drone>>,
 ) {
     if grid.dims == UVec3::ZERO {
@@ -397,7 +398,7 @@ pub fn replan_paths(
         let drone_pos = transform.translation;
         let start = (drone_pos / cell_size).floor().as_uvec3();
         let goal = (target_pos / cell_size).floor().as_uvec3();
-        match plan(&grid, start, goal) {
+        match plan(&grid, start, goal, &mut scratch) {
             Some(cells) => {
                 path.waypoints.clear();
                 path.waypoints.extend(cells.iter().map(|c| grid.world_pos_of(*c)));
