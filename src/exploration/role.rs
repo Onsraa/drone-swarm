@@ -65,12 +65,11 @@ impl RoleParams {
                 tint: [1.0, 0.85, 0.2, 0.85],
             },
             Role::Mapper => Self {
-                // Mapper is the slow, thorough scanner: 360° spherical
-                // lidar (half-angle = 180° produces a full sphere in
+                // Mapper is the thorough scanner: 360° spherical lidar
+                // (half-angle = 180° produces a full sphere in
                 // `fibonacci_cone`), high ray density, scan every
-                // frame. Visibly different from Scout's narrow
-                // forward cone. 1 m/s = 15x slower than the Scout.
-                cruise_speed_mps: 1.0,
+                // frame. Slower than Scout (~4x) but not stuck.
+                cruise_speed_mps: 4.0,
                 cone_half_angle_deg: 180.0,
                 max_range_cells: 64,
                 rays_per_scan: 192,
