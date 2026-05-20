@@ -512,13 +512,20 @@ pub fn steer_along_path(
         if dist < 1e-3 {
             continue;
         }
-        // Arrival ramp: scale cruise by min(dist / ARRIVAL_RADIUS, 1.0).
-        // Far away → full cruise. Inside the arrival radius → linearly
-        // taper to 0 at the goal so the controller sees a negative
-        // forward-error and can pitch backward to brake. Without this
-        // the drone always requests `cruise` m/s even at 1 m out,
-        // overshooting + oscillating around the target.
-        let arrival_scale = (dist / ARRIVAL_RADIUS_M).clamp(0.0, 1.0);
+        // Arrival ramp keys off distance to the FINAL target (last
+        // waypoint or frontier.pos), not the next A* waypoint. A*
+        // waypoints are spaced ~8 m apart, so braking on every
+        // intermediate waypoint would chop the drone into baby steps
+        // and it would never reach cruise. Only the last leg should
+        // ramp down.
+        let final_pos = path
+            .waypoints
+            .last()
+            .copied()
+            .or(frontier.pos)
+            .unwrap_or(goal);
+        let dist_to_final = (final_pos - pos).length();
+        let arrival_scale = (dist_to_final / ARRIVAL_RADIUS_M).clamp(0.0, 1.0);
         let target_vel = (to_goal / dist) * cruise * arrival_scale;
         let alpha = (PATH_FOLLOW_LERP_RATE * dt).min(1.0);
         desired.0 = desired.0.lerp(target_vel, alpha);
