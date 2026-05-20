@@ -46,7 +46,13 @@ pub fn quadcopter_controller(
         } else {
             current_forward_horizontal
         };
-        let yaw_angle = target_forward_horizontal.x.atan2(-target_forward_horizontal.z);
+        // Bevy is Y-up right-handed. `Quat::from_rotation_y(θ)` applied
+        // to `NEG_Z` (the default forward) gives `(-sin θ, 0, -cos θ)`.
+        // To make the drone face `(fx, 0, fz)`, solve sin θ = -fx,
+        // cos θ = -fz → θ = atan2(-fx, -fz). Missing the X negation
+        // (the original code) flipped pursuit on the X axis: drones
+        // headed east instead of west and vice versa.
+        let yaw_angle = (-target_forward_horizontal.x).atan2(-target_forward_horizontal.z);
         let yaw_quat = Quat::from_rotation_y(yaw_angle);
 
         let forward_speed_actual = linvel.0.dot(current_forward_horizontal);
