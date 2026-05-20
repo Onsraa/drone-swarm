@@ -876,7 +876,17 @@ pub fn apply_role_steering(
             }
         };
 
-        let total = role_force + separation + terrain;
-        desired.0 = total.clamp_length_max(cruise.max(2.0) * 1.5);
+        // Cap each contributor independently so a giant separation
+        // term can't drag a slow Mapper up to Scout-speed. role_force
+        // is always magnitude `cruise` (or 0 for hover), so cap it
+        // there. Repulsion forces get their own cap proportional to
+        // role cruise too — fast roles can dodge harder, slow roles
+        // can't be flung. Final magnitude clamp on the sum keeps the
+        // tracker stable.
+        let role_capped = role_force.clamp_length_max(cruise);
+        let avoid_cap = (cruise * 1.5).max(2.0);
+        let avoid_combined = (separation + terrain).clamp_length_max(avoid_cap);
+        let total = role_capped + avoid_combined;
+        desired.0 = total.clamp_length_max((cruise + avoid_cap).max(2.0));
     }
 }
