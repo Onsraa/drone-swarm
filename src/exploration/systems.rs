@@ -3,16 +3,16 @@ use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 
 use crate::comms::CommsState;
-use crate::drone::{Drone, DroneId};
+use crate::drone::{Drone, DroneColor, DroneId};
 use crate::lidar::gpu::GpuGlobalOccupancyMirror;
 use crate::physics::{DesiredVelocity, LinearVelocity};
 
 use super::cluster::build_clusters;
-use super::components::{FrontierTarget, MovementHealth, Path};
+use super::components::{FrontierTarget, MovementHealth, Path, Trail};
 use super::constants::{
     AVOID_RADIUS_M, FRONTIER_REACHED_DIST, MAX_FRONTIER_CANDIDATES, PATH_FOLLOW_LERP_RATE,
     PLANNER_DOWNSAMPLE, SCORE_UPGRADE_RATIO, STUCK_ESCALATION_WINDOW_SECS, STUCK_SECS,
-    STUCK_VEL_MPS,
+    STUCK_VEL_MPS, TRAIL_MAX_POINTS, TRAIL_SAMPLE_INTERVAL_SECS,
 };
 
 /// Cap how many A* calls run per frame to amortise the cost of large
@@ -582,6 +582,95 @@ pub fn enforce_anchor_hover(
     for (role, mut desired) in &mut q {
         if *role == Role::Anchor {
             desired.0 = Vec3::ZERO;
+        }
+    }
+}
+
+/// Push the drone's current position into its `Trail` ring buffer at a
+/// fixed sample interval. The interval keeps the line readable at low
+/// flight speeds (per-frame sampling would clump points within a few
+/// cm at 120 FPS).
+pub fn sample_trails(
+    time: Res<Time>,
+    mut q: Query<(&Transform, &mut Trail), With<Drone>>,
+) {
+    let now = time.elapsed_secs();
+    for (transform, mut trail) in &mut q {
+        if now - trail.last_sample_secs < TRAIL_SAMPLE_INTERVAL_SECS {
+            continue;
+        }
+        trail.last_sample_secs = now;
+        trail.points.push_back(transform.translation);
+        while trail.points.len() > TRAIL_MAX_POINTS {
+            trail.points.pop_front();
+        }
+    }
+}
+
+/// Draw the recent-position trail behind each drone as a gizmo
+/// polyline. Color = drone tint with a per-segment alpha ramp so older
+/// samples fade toward transparent.
+pub fn draw_trail_gizmos(
+    ui_state: Res<crate::ui::UiState>,
+    mut gizmos: Gizmos,
+    q: Query<(&Transform, &DroneColor, &Trail), With<Drone>>,
+) {
+    if !ui_state.show_trails {
+        return;
+    }
+    for (transform, color, trail) in &q {
+        if trail.points.len() < 2 {
+            continue;
+        }
+        let base = color.0.to_linear();
+        let n = trail.points.len();
+        for (i, window) in trail.points.iter().collect::<Vec<_>>().windows(2).enumerate() {
+            // Alpha ramps from ~0.1 at the oldest segment to 1.0 at
+            // the newest — makes the head of the trail pop while the
+            // tail dissolves into the world.
+            let t = (i + 1) as f32 / n as f32;
+            let alpha = 0.1 + 0.9 * t;
+            let c = Color::linear_rgba(base.red, base.green, base.blue, alpha);
+            gizmos.line(*window[0], *window[1], c);
+        }
+        // Final segment from the last sample to the live position so
+        // the trail tip stays glued to the drone.
+        if let Some(last) = trail.points.back() {
+            let c = Color::linear_rgba(base.red, base.green, base.blue, 1.0);
+            gizmos.line(*last, transform.translation, c);
+        }
+    }
+}
+
+/// Draw the planned A* polyline ahead of each drone plus a final
+/// dashed line to the frontier target centroid. Different colors for
+/// "path ahead" vs "target lock" so they're distinguishable.
+pub fn draw_path_gizmos(
+    ui_state: Res<crate::ui::UiState>,
+    mut gizmos: Gizmos,
+    q: Query<(&Transform, &DroneColor, &Path, &FrontierTarget), With<Drone>>,
+) {
+    if !ui_state.show_paths {
+        return;
+    }
+    for (transform, color, path, target) in &q {
+        let base = color.0.to_linear();
+        // Path polyline: drone -> next waypoint -> ... -> last waypoint.
+        if !path.waypoints.is_empty() {
+            let c = Color::linear_rgba(base.red, base.green, base.blue, 0.55);
+            let mut prev = transform.translation;
+            for wp in &path.waypoints[path.cursor..] {
+                gizmos.line(prev, *wp, c);
+                prev = *wp;
+            }
+        }
+        // Target lock: faint white tag at the cluster centroid.
+        if let Some(target_pos) = target.pos {
+            gizmos.sphere(
+                Isometry3d::from_translation(target_pos),
+                1.5,
+                Color::linear_rgba(1.0, 1.0, 1.0, 0.35),
+            );
         }
     }
 }

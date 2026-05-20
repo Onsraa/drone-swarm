@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use rand::{Rng, RngExt};
 
 use crate::exploration::{
-    FrontierTarget, LastRoleChange, MovementHealth, Path, Role, RoleParams,
+    FrontierTarget, LastRoleChange, MovementHealth, Path, Role, RoleParams, Trail,
 };
 use crate::physics::{DesiredAttitude, DesiredVelocity, LinearVelocity, ThrustState};
 use crate::world::WorldConfig;
@@ -78,6 +78,7 @@ fn spawn_one_drone(
             FrontierTarget::default(),
             MovementHealth::default(),
             Path::default(),
+            Trail::default(),
             LastRoleChange::default(),
             Transform::from_translation(spawn_pos).with_scale(Vec3::splat(DRONE_SCALE)),
             Visibility::default(),

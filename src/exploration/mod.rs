@@ -11,15 +11,16 @@ pub mod systems;
 
 use bevy::prelude::*;
 
-pub use components::{FrontierTarget, MovementHealth, Path};
+pub use components::{FrontierTarget, MovementHealth, Path, Trail};
 pub use resources::{FrontierClusters, PlannerGrid};
 pub use role::{Role, RoleParams};
 pub use supervisor::{LastRoleChange, SupervisorTimer};
 
 use crate::physics::PhysicsSet;
 use systems::{
-    assign_targets, compute_frontier_clusters, enforce_anchor_hover, rebuild_planner_grid,
-    reactive_avoid, replan_paths, steer_along_path, stuck_recovery, update_movement_health,
+    assign_targets, compute_frontier_clusters, draw_path_gizmos, draw_trail_gizmos,
+    enforce_anchor_hover, rebuild_planner_grid, reactive_avoid, replan_paths,
+    sample_trails, steer_along_path, stuck_recovery, update_movement_health,
 };
 
 pub struct ExplorationPlugin;
@@ -55,6 +56,7 @@ impl Plugin for ExplorationPlugin {
                     .after(steer_along_path)
                     .after(reactive_avoid)
                     .before(PhysicsSet::Control),
-            );
+            )
+            .add_systems(Update, (sample_trails, draw_trail_gizmos, draw_path_gizmos));
     }
 }

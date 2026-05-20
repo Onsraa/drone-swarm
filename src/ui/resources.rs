@@ -6,6 +6,12 @@ pub struct UiState {
     pub show_local_maps: bool,
     pub show_global_map: bool,
     pub show_lidar_points: bool,
+    /// Gizmo trail line through each drone's recent positions, tinted
+    /// in the drone's color. Past = solid, fading with age.
+    pub show_trails: bool,
+    /// Gizmo line from each drone to its current frontier target,
+    /// plus the A* waypoint polyline ahead.
+    pub show_paths: bool,
     /// 64-bit visibility mask, bit `i` = drone id `i` rendered in the
     /// local-map layer. `[lo, hi]` halves match the WGSL pair on the
     /// build-shader side. Default all-ones (every drone visible).
@@ -48,6 +54,8 @@ impl Default for UiState {
             show_local_maps: true,
             show_global_map: true,
             show_lidar_points: true,
+            show_trails: true,
+            show_paths: true,
             drone_mask: [u32::MAX, u32::MAX],
         }
     }

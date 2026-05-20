@@ -24,3 +24,13 @@ pub struct MovementHealth {
     pub escalations_in_window: u32,
     pub window_start_secs: f32,
 }
+
+/// Sampled past positions of a drone, drawn as a gizmo trail. Bounded
+/// ring of `TRAIL_MAX_POINTS`; older samples fall off the front when
+/// new ones push in. Sampled at a small interval so the line stays
+/// readable at swarm scale.
+#[derive(Component, Default, Debug)]
+pub struct Trail {
+    pub points: std::collections::VecDeque<Vec3>,
+    pub last_sample_secs: f32,
+}

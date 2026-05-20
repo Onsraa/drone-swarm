@@ -29,3 +29,13 @@ pub const SCORE_DISTANCE_WEIGHT: f32 = 1.0;
 pub const SCORE_DISTANCE_BIAS: f32 = 1.0;
 pub const SCORE_CROWDING_WEIGHT: f32 = 1.0;
 pub const SCORE_UPGRADE_RATIO: f32 = 1.5;
+
+// Trail (gizmo viz)
+/// Points retained per-drone in the trail buffer. 120 samples × 0.2 s
+/// interval = ~24 s of recent travel. Visualization-only, so the
+/// memory + draw cost is fine at 50 drones.
+pub const TRAIL_MAX_POINTS: usize = 120;
+/// Seconds between trail samples. Sampling on every Update tick wastes
+/// gizmo draw budget on points that are 1 mm apart at low FPS; the
+/// 0.2 s gate keeps the line smooth without flooding.
+pub const TRAIL_SAMPLE_INTERVAL_SECS: f32 = 0.2;
