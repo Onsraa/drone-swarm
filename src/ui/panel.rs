@@ -5,7 +5,7 @@ use bevy_egui::{egui, EguiContexts};
 use crate::camera::CameraMode;
 use crate::comms::{CommsSettings, CommsState, MAX_COMMS_RANGE_M, MIN_COMMS_RANGE_M};
 use crate::drone::{Drone, DroneColor, DroneId, DroneSpawnConfig, MAX_DRONE_COUNT, MIN_DRONE_COUNT};
-use crate::exploration::Role;
+use crate::exploration::{FrontierTarget, Role};
 use crate::groups::DroneGroupPresets;
 use crate::lidar::{gpu::GpuGlobalStats, LidarSettings};
 use crate::maps::{AvailableMaps, MapSwapRequested};
@@ -27,8 +27,10 @@ pub fn draw_ui(
     mut preset_name_buf: Local<String>,
     comms_state: Res<CommsState>,
     camera_mode: Res<CameraMode>,
-    drones_q: Query<(&DroneId, &DroneColor), With<Drone>>,
-    drones_role_q: Query<&Role, With<Drone>>,
+    drones_q: Query<
+        (&DroneId, &DroneColor, &Role, &Transform, &FrontierTarget),
+        With<Drone>,
+    >,
     gpu_stats: Res<GpuGlobalStats>,
     world: Res<WorldConfig>,
     diagnostics: Res<DiagnosticsStore>,
@@ -74,11 +76,11 @@ pub fn draw_ui(
             draw_comms_controls(ui, &mut comms_settings, &comms_state);
             ui.separator();
 
-            draw_drone_visibility(ui, &mut state, &drones_q);
+            draw_drone_telemetry(ui, &mut state, &drones_q, &comms_state);
             draw_group_presets(ui, &mut state, &mut presets, &mut preset_name_buf);
             ui.separator();
 
-            draw_roles(ui, &drones_role_q);
+            draw_roles(ui, &drones_q);
             ui.separator();
 
             ui.label("Central map (GPU readback):");
@@ -243,12 +245,39 @@ fn draw_lidar_sliders(ui: &mut egui::Ui, settings: &mut LidarSettings) {
     );
 }
 
-fn draw_drone_visibility(
+fn role_letter(role: Role) -> &'static str {
+    match role {
+        Role::Scout => "S",
+        Role::Mapper => "M",
+        Role::Anchor => "A",
+    }
+}
+
+fn role_color(role: Role) -> egui::Color32 {
+    // Match RoleParams tints so the panel + the rendered drone +
+    // map dots all read the same.
+    match role {
+        Role::Scout => egui::Color32::from_rgb(230, 200, 60),
+        Role::Mapper => egui::Color32::from_rgb(80, 200, 110),
+        Role::Anchor => egui::Color32::from_rgb(230, 230, 230),
+    }
+}
+
+fn drone_connected(comms: &CommsState, id: u32) -> bool {
+    let half = (id >= 32) as usize;
+    (comms.connected_mask[half] >> (id % 32)) & 1 == 1
+}
+
+fn draw_drone_telemetry(
     ui: &mut egui::Ui,
     state: &mut UiState,
-    drones_q: &Query<(&DroneId, &DroneColor), With<Drone>>,
+    drones_q: &Query<
+        (&DroneId, &DroneColor, &Role, &Transform, &FrontierTarget),
+        With<Drone>,
+    >,
+    comms: &CommsState,
 ) {
-    ui.label("Drones (visibility)");
+    ui.label("Drones (telemetry)");
     ui.horizontal(|ui| {
         if ui.button("All").clicked() {
             state.drone_mask_all();
@@ -261,14 +290,20 @@ fn draw_drone_visibility(
         }
     });
 
-    let mut ids: Vec<(u32, Color)> = drones_q.iter().map(|(id, c)| (id.0, c.0)).collect();
-    ids.sort_by_key(|(id, _)| *id);
+    let mut rows: Vec<(u32, Color, Role, f32, Option<u32>)> = drones_q
+        .iter()
+        .map(|(id, c, role, t, ft)| {
+            let dist = ft.pos.map(|p| p.distance(t.translation)).unwrap_or(0.0);
+            (id.0, c.0, *role, dist, ft.cluster_id)
+        })
+        .collect();
+    rows.sort_by_key(|(id, ..)| *id);
 
     egui::ScrollArea::vertical()
-        .max_height(180.0)
+        .max_height(220.0)
         .auto_shrink([false, true])
         .show(ui, |ui| {
-            for (id, color) in ids {
+            for (id, color, role, dist, cluster_id) in rows {
                 ui.horizontal(|ui| {
                     let linear = color.to_linear();
                     let swatch = egui::Color32::from_rgb(
@@ -281,8 +316,32 @@ fn draw_drone_visibility(
                     ui.painter().rect_filled(rect, 2.0, swatch);
 
                     let mut visible = state.is_drone_visible(id);
-                    if ui.checkbox(&mut visible, format!("#{}", id)).changed() {
+                    if ui.checkbox(&mut visible, format!("#{:>2}", id)).changed() {
                         state.set_drone_visible(id, visible);
+                    }
+
+                    ui.colored_label(role_color(role), role_letter(role));
+
+                    let connected = drone_connected(comms, id);
+                    let (sym, col) = if connected {
+                        ("●", egui::Color32::from_rgb(120, 200, 255))
+                    } else {
+                        ("○", egui::Color32::from_rgb(160, 100, 100))
+                    };
+                    ui.colored_label(col, sym)
+                        .on_hover_text(if connected {
+                            "in comms cluster"
+                        } else {
+                            "isolated"
+                        });
+
+                    match cluster_id {
+                        Some(cid) => {
+                            ui.label(format!("→c{} {:.0}m", cid, dist));
+                        }
+                        None => {
+                            ui.label("—");
+                        }
                     }
                 });
             }
@@ -291,12 +350,15 @@ fn draw_drone_visibility(
 
 fn draw_roles(
     ui: &mut egui::Ui,
-    drones_q: &Query<&Role, With<Drone>>,
+    drones_q: &Query<
+        (&DroneId, &DroneColor, &Role, &Transform, &FrontierTarget),
+        With<Drone>,
+    >,
 ) {
     let mut scouts = 0u32;
     let mut mappers = 0u32;
     let mut anchors = 0u32;
-    for role in drones_q.iter() {
+    for (_, _, role, _, _) in drones_q.iter() {
         match role {
             Role::Scout => scouts += 1,
             Role::Mapper => mappers += 1,
@@ -305,7 +367,12 @@ fn draw_roles(
     }
     let total = scouts + mappers + anchors;
     ui.label(format!("Roles ({} total)", total));
-    ui.label(format!("  Scouts:  {}", scouts));
-    ui.label(format!("  Mappers: {}", mappers));
-    ui.label(format!("  Anchors: {}", anchors));
+    ui.horizontal(|ui| {
+        ui.colored_label(role_color(Role::Scout), "S");
+        ui.label(format!("scouts {}", scouts));
+        ui.colored_label(role_color(Role::Mapper), "M");
+        ui.label(format!("mappers {}", mappers));
+        ui.colored_label(role_color(Role::Anchor), "A");
+        ui.label(format!("anchors {}", anchors));
+    });
 }
