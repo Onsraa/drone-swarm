@@ -22,7 +22,15 @@ pub const PLANNER_DEEP_UNKNOWN_MULT: f32 = 5.0;
 /// backward to brake.
 pub const ARRIVAL_RADIUS_M: f32 = 10.0;
 pub const AVOID_RADIUS_M: f32 = 4.0;
-pub const AVOID_RADIUS_PEER_M: f32 = 6.0;
+/// Personal-space radius for peer drones. Bigger than terrain radius
+/// + non-linear falloff under the hard "personal bubble" radius
+/// (`PEER_BUBBLE_RADIUS_M`) keeps drones from physically overlapping.
+pub const AVOID_RADIUS_PEER_M: f32 = 10.0;
+/// Inside this radius the peer-repulsion force ramps up as the
+/// inverse of distance (1 / d clamped) rather than the quadratic
+/// (1 - d/R)² falloff used outside it. Effect: drones cannot
+/// inter-penetrate because the force diverges at zero distance.
+pub const PEER_BUBBLE_RADIUS_M: f32 = 3.0;
 
 // Stuck detection
 pub const STUCK_VEL_MPS: f32 = 0.5;

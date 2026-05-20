@@ -1,5 +1,5 @@
 use super::components::Path;
-use super::constants::{AVOID_RADIUS_M, AVOID_RADIUS_PEER_M};
+use super::constants::{AVOID_RADIUS_M, AVOID_RADIUS_PEER_M, PEER_BUBBLE_RADIUS_M};
 use bevy::prelude::*;
 
 /// Distance under which a waypoint is considered "reached" and the
@@ -38,10 +38,9 @@ pub fn pure_pursuit(path: &mut Path, drone_pos: Vec3) -> Option<Vec3> {
     path.waypoints.get(path.cursor).copied()
 }
 
-/// Quadratic-falloff repulsion. Each obstacle within its radius
-/// contributes a force pointing from obstacle to drone, scaled by
-/// `avoid_k * (1 - d/R)^2`. Obstacles split into two radii so peers
-/// can have a wider personal-space bubble than terrain.
+/// Quadratic-falloff repulsion for terrain hits. Each obstacle within
+/// its radius contributes a force pointing from obstacle to drone,
+/// scaled by `avoid_k * (1 - d/R)^2`.
 pub fn reactive_force(
     drone_pos: Vec3,
     lidar_hits: &[Vec3],
@@ -49,7 +48,7 @@ pub fn reactive_force(
     avoid_k: f32,
 ) -> Vec3 {
     let mut total = Vec3::ZERO;
-    let scale = |pos: Vec3, radius: f32| -> Vec3 {
+    let terrain_scale = |pos: Vec3, radius: f32| -> Vec3 {
         let dir = drone_pos - pos;
         let d = dir.length();
         if d < 1e-3 || d > radius {
@@ -58,11 +57,29 @@ pub fn reactive_force(
         let strength = avoid_k * (1.0 - d / radius).powi(2);
         (dir / d) * strength
     };
+    // Peers get a quadratic falloff outside `PEER_BUBBLE_RADIUS_M`
+    // (same as terrain) plus a near-singular `avoid_k * (R/d - 1)`
+    // term inside it. The singular term shoots toward infinity as
+    // d → 0, which is what prevents two drones from inter-penetrating.
+    let peer_scale = |pos: Vec3| -> Vec3 {
+        let dir = drone_pos - pos;
+        let d = dir.length();
+        if d < 1e-3 || d > AVOID_RADIUS_PEER_M {
+            return Vec3::ZERO;
+        }
+        let outer = avoid_k * (1.0 - d / AVOID_RADIUS_PEER_M).powi(2);
+        let inner = if d < PEER_BUBBLE_RADIUS_M {
+            avoid_k * (PEER_BUBBLE_RADIUS_M / d - 1.0)
+        } else {
+            0.0
+        };
+        (dir / d) * (outer + inner)
+    };
     for &hit in lidar_hits {
-        total += scale(hit, AVOID_RADIUS_M);
+        total += terrain_scale(hit, AVOID_RADIUS_M);
     }
     for &peer in peer_positions {
-        total += scale(peer, AVOID_RADIUS_PEER_M);
+        total += peer_scale(peer);
     }
     total
 }

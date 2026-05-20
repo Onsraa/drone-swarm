@@ -40,8 +40,11 @@ impl RoleParams {
                 info_weight: 1.0,
                 distance_weight: 0.3,
                 distance_bias: 1.0,
-                crowding_weight: 0.5,
-                avoid_k: 4.0,
+                // 10x the old weight so two scouts targeting the same
+                // cluster see ~half the score versus an empty alternative
+                // of comparable distance. Drives target diversification.
+                crowding_weight: 8.0,
+                avoid_k: 12.0,
                 tint: [1.0, 0.85, 0.2, 0.85],
             },
             Role::Mapper => Self {
@@ -53,8 +56,8 @@ impl RoleParams {
                 info_weight: 1.5,
                 distance_weight: 1.0,
                 distance_bias: 1.0,
-                crowding_weight: 1.5,
-                avoid_k: 6.0,
+                crowding_weight: 12.0,
+                avoid_k: 16.0,
                 tint: [0.3, 0.8, 0.35, 0.85],
             },
             Role::Anchor => Self {
@@ -67,7 +70,7 @@ impl RoleParams {
                 distance_weight: 0.0,
                 distance_bias: 1.0,
                 crowding_weight: 0.0,
-                avoid_k: 10.0,
+                avoid_k: 20.0,
                 tint: [0.92, 0.95, 1.0, 0.85],
             },
         }
