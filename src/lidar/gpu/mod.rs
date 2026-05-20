@@ -365,22 +365,26 @@ fn spawn_global_stats_readback(
              mut mirror: ResMut<GpuGlobalOccupancyMirror>,
              mut throttle: Local<u32>| {
                 // Throttle: only decode every 4th readback (~15 Hz at
-                // 60 FPS, ~30 Hz at 120 FPS). Skipping early avoids the
-                // 1.2 MB `to_shader_type` allocation entirely on the
-                // dropped firings. Downstream consumers (frontier
-                // scan, planner grid, reactive_avoid) tolerate the
-                // ~67 ms lag.
+                // 60 FPS, ~30 Hz at 120 FPS). Skipping early avoids
+                // the 2.4 MB mirror copy entirely on the dropped
+                // firings. Downstream consumers (frontier scan,
+                // planner grid, reactive_avoid) tolerate the ~67 ms
+                // lag.
                 *throttle = throttle.wrapping_add(1);
                 if *throttle % 4 != 0 {
                     return;
                 }
-                let data: Vec<u32> = event.to_shader_type();
-                // Bitwise + popcount decode: each u32 holds 16 cells,
-                // 2 bits each, even bits = Free flag, odd = Occupied.
-                // Occupied wins when both set (state == 0b11).
+                // Zero-alloc decode: reinterpret the raw byte buffer
+                // as &[u32]. Bypasses `to_shader_type`'s encase reader
+                // which would `default()` a Vec then resize it (one
+                // 2.4 MB allocation per fire). Bitwise + popcount:
+                // each u32 holds 16 cells, 2 bits each, even bits =
+                // Free flag, odd = Occupied. Occupied wins when both
+                // set (state == 0b11).
+                let words: &[u32] = bytemuck::cast_slice(&event.data);
                 let mut free = 0usize;
                 let mut occupied = 0usize;
-                for &word in &data {
+                for &word in words {
                     let occ_bits = word & 0xAAAAAAAA;
                     let free_bits = word & 0x55555555;
                     let free_only = free_bits & !(occ_bits >> 1);
@@ -389,7 +393,11 @@ fn spawn_global_stats_readback(
                 }
                 stats.free = free;
                 stats.occupied = occupied;
-                mirror.data = data;
+                // Reuse the existing mirror Vec — `extend_from_slice`
+                // memcpys into the existing allocation instead of
+                // dropping + reallocating it.
+                mirror.data.clear();
+                mirror.data.extend_from_slice(words);
             },
         );
 }
