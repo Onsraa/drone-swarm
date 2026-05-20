@@ -2,7 +2,7 @@ mod components;
 pub mod constants;
 pub mod gpu;
 mod resources;
-mod sampling;
+pub mod sampling;
 
 use bevy::prelude::*;
 

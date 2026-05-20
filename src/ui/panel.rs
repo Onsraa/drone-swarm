@@ -56,6 +56,7 @@ pub fn draw_ui(
             ui.checkbox(&mut state.show_local_maps, "Show drone local maps");
             ui.checkbox(&mut state.show_global_map, "Show central map");
             ui.checkbox(&mut state.show_lidar_points, "Show lidar spray (points)");
+            ui.checkbox(&mut state.show_raycast_lines, "Show raycast lines (per role)");
             ui.checkbox(&mut state.show_trails, "Show drone trails");
             ui.checkbox(&mut state.show_paths, "Show drone paths + targets");
             ui.separator();

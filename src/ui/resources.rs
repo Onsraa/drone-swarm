@@ -12,6 +12,10 @@ pub struct UiState {
     /// Gizmo line from each drone to its current frontier target,
     /// plus the A* waypoint polyline ahead.
     pub show_paths: bool,
+    /// Per-drone raycast gizmo lines showing the role's sensor shape
+    /// (scout cone, mapper sphere, anchor hemisphere) cast against
+    /// ground truth.
+    pub show_raycast_lines: bool,
     /// 64-bit visibility mask, bit `i` = drone id `i` rendered in the
     /// local-map layer. `[lo, hi]` halves match the WGSL pair on the
     /// build-shader side. Default all-ones (every drone visible).
@@ -55,7 +59,8 @@ impl Default for UiState {
             show_global_map: true,
             show_lidar_points: true,
             show_trails: true,
-            show_paths: true,
+            show_paths: false,
+            show_raycast_lines: true,
             drone_mask: [u32::MAX, u32::MAX],
         }
     }

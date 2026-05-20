@@ -32,7 +32,7 @@ impl RoleParams {
     pub fn for_role(role: Role) -> Self {
         match role {
             Role::Scout => Self {
-                cruise_speed_mps: 8.0,
+                cruise_speed_mps: 10.0,
                 cone_half_angle_deg: 15.0,
                 max_range_cells: 160,
                 rays_per_scan: 32,
@@ -48,10 +48,15 @@ impl RoleParams {
                 tint: [1.0, 0.85, 0.2, 0.85],
             },
             Role::Mapper => Self {
-                cruise_speed_mps: 3.0,
-                cone_half_angle_deg: 90.0,
+                // Mapper is the slow, thorough scanner: 360° spherical
+                // lidar (half-angle = 180° produces a full sphere in
+                // `fibonacci_cone`), high ray density, scan every
+                // frame. Visibly different from Scout's narrow
+                // forward cone.
+                cruise_speed_mps: 2.0,
+                cone_half_angle_deg: 180.0,
                 max_range_cells: 64,
-                rays_per_scan: 128,
+                rays_per_scan: 192,
                 scan_interval_frames: 1,
                 info_weight: 1.5,
                 distance_weight: 1.0,
