@@ -68,6 +68,12 @@ pub fn init_compute_lidar_bvh_pipeline(
                 storage_buffer_read_only::<Vec<u32>>(false),
                 // 18: per-material flat albedo (RGBA linear).
                 storage_buffer_read_only::<Vec<Vec4>>(false),
+                // 19: per-vertex UV0 (3 × vec2 per triangle).
+                storage_buffer_read_only::<Vec<Vec2>>(false),
+                // 20: per-material atlas rect (u_min, v_min, u_size, v_size).
+                storage_buffer_read_only::<Vec<Vec4>>(false),
+                // 21: atlas pixels, packed RGBA8 in u32.
+                storage_buffer_read_only::<Vec<u32>>(false),
             ),
         ),
     );

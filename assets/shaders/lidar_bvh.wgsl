@@ -21,7 +21,7 @@ struct LidarParams {
     connected_mask_lo: u32,
     connected_mask_hi: u32,
     spray_use_albedo: u32,
-    _pad1: u32,
+    atlas_size_px: u32,
 };
 
 struct DroneScanParams {
@@ -50,6 +50,9 @@ struct DroneScanParams {
 @group(0) @binding(16) var<storage, read> bvh_triangle_vertices: array<vec4<f32>>;
 @group(0) @binding(17) var<storage, read> bvh_tri_materials: array<u32>;
 @group(0) @binding(18) var<storage, read> bvh_material_palette: array<vec4<f32>>;
+@group(0) @binding(19) var<storage, read> bvh_tri_uvs: array<vec2<f32>>;
+@group(0) @binding(20) var<storage, read> bvh_material_rects: array<vec4<f32>>;
+@group(0) @binding(21) var<storage, read> bvh_atlas: array<u32>;
 
 const MAX_LOCAL_ACTIVE_PER_DRONE: u32 = 200000u;
 const MAX_GLOBAL_ACTIVE: u32 = 500000u;
@@ -389,7 +392,62 @@ fn lidar_bvh(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let tri_idx = bvh_primitive_indices[result.primitive_id];
     let mat_id = bvh_tri_materials[tri_idx];
-    let albedo = bvh_material_palette[mat_id];
+    let albedo = sample_atlas_at_hit(tri_idx, mat_id, hit_world);
     let color = select(drone_colors[drone_idx], albedo, params.spray_use_albedo != 0u);
     emit_point(drone_idx, hit_world, color);
+}
+
+// Compute the barycentric coordinates of `hit_world` on triangle
+// `tri_idx`, interpolate the per-vertex UV0, wrap to [0, 1), map into
+// the material's atlas rect, and nearest-neighbour sample the packed
+// `bvh_atlas` pixel. Atlas pixels are pre-multiplied by the material
+// tint by the CPU baker, so the returned `vec4` is the final linear
+// albedo without further palette multiplication.
+fn sample_atlas_at_hit(tri_idx: u32, mat_id: u32, hit_world: vec3<f32>) -> vec4<f32> {
+    let v0 = bvh_triangle_vertices[tri_idx * 3u + 0u].xyz;
+    let v1 = bvh_triangle_vertices[tri_idx * 3u + 1u].xyz;
+    let v2 = bvh_triangle_vertices[tri_idx * 3u + 2u].xyz;
+
+    let e01 = v1 - v0;
+    let e02 = v2 - v0;
+    let pv0 = hit_world - v0;
+    let d00 = dot(e01, e01);
+    let d01 = dot(e01, e02);
+    let d11 = dot(e02, e02);
+    let d20 = dot(pv0, e01);
+    let d21 = dot(pv0, e02);
+    let denom = d00 * d11 - d01 * d01;
+    if (abs(denom) < 1.0e-12) {
+        return bvh_material_palette[mat_id];
+    }
+    let inv_denom = 1.0 / denom;
+    let s = (d11 * d20 - d01 * d21) * inv_denom;
+    let t = (d00 * d21 - d01 * d20) * inv_denom;
+    let w = 1.0 - s - t;
+
+    let uv0 = bvh_tri_uvs[tri_idx * 3u + 0u];
+    let uv1 = bvh_tri_uvs[tri_idx * 3u + 1u];
+    let uv2 = bvh_tri_uvs[tri_idx * 3u + 2u];
+    let uv = w * uv0 + s * uv1 + t * uv2;
+    let uv_wrap = uv - floor(uv);
+
+    let rect = bvh_material_rects[mat_id];
+    let atlas_uv = vec2<f32>(
+        rect.x + uv_wrap.x * rect.z,
+        rect.y + uv_wrap.y * rect.w,
+    );
+
+    let asz = f32(params.atlas_size_px);
+    if (asz < 1.0) {
+        return bvh_material_palette[mat_id];
+    }
+    let ax = u32(clamp(atlas_uv.x * asz, 0.0, asz - 1.0));
+    let ay = u32(clamp(atlas_uv.y * asz, 0.0, asz - 1.0));
+    let pixel_idx = ay * params.atlas_size_px + ax;
+    let packed = bvh_atlas[pixel_idx];
+    let r = f32(packed & 0xffu) / 255.0;
+    let g = f32((packed >> 8u) & 0xffu) / 255.0;
+    let b = f32((packed >> 16u) & 0xffu) / 255.0;
+    let a = f32((packed >> 24u) & 0xffu) / 255.0;
+    return vec4<f32>(r, g, b, a);
 }

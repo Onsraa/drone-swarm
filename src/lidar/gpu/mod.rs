@@ -8,9 +8,10 @@ mod resources;
 
 pub use per_drone_scan::{DroneScanParams, DroneScanParamsBuffer};
 pub use resources::{
-    BuildIndirectBuffer, BuildLocalParamsBuffer, BvhMaterialPaletteBuffer, BvhNodesBuffer,
-    BvhPrimitiveIndicesBuffer, BvhTriMaterialsBuffer, BvhTriangleVerticesBuffer, DroneColorsBuffer,
-    DroneOrientationsBuffer, DronePositionsBuffer, GlobalActiveCellsBuffer, GlobalActiveCountBuffer,
+    BuildIndirectBuffer, BuildLocalParamsBuffer, BvhAtlasBuffer, BvhMaterialPaletteBuffer,
+    BvhMaterialRectsBuffer, BvhNodesBuffer, BvhPrimitiveIndicesBuffer, BvhTriMaterialsBuffer,
+    BvhTriUvsBuffer, BvhTriangleVerticesBuffer, DroneColorsBuffer, DroneOrientationsBuffer,
+    DronePositionsBuffer, GlobalActiveCellsBuffer, GlobalActiveCountBuffer,
     GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, GlobalOccupancyBuffer, LidarParamsBuffer,
     LidarPointCountBuffer, LidarPointVecBuffer, LocalActiveCellsBuffer, LocalActiveCountBuffer,
     LocalInstanceCountBuffer, LocalInstanceVecBuffer, RayDirsBuffer, RoleConeRanges,
@@ -105,6 +106,9 @@ impl Plugin for GpuLidarPlugin {
             .add_plugins(ExtractResourcePlugin::<BvhTriangleVerticesBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<BvhTriMaterialsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<BvhMaterialPaletteBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<BvhTriUvsBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<BvhMaterialRectsBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<BvhAtlasBuffer>::default())
             .add_systems(
                 Update,
                 (
@@ -121,7 +125,10 @@ impl Plugin for GpuLidarPlugin {
                         .run_if(resource_exists::<WorldBvh>)
                         .run_if(resource_exists::<BvhNodesBuffer>)
                         .run_if(resource_exists::<BvhTriMaterialsBuffer>)
-                        .run_if(resource_exists::<BvhMaterialPaletteBuffer>),
+                        .run_if(resource_exists::<BvhMaterialPaletteBuffer>)
+                        .run_if(resource_exists::<BvhTriUvsBuffer>)
+                        .run_if(resource_exists::<BvhMaterialRectsBuffer>)
+                        .run_if(resource_exists::<BvhAtlasBuffer>),
                 ),
             );
 
@@ -181,6 +188,9 @@ fn upload_bvh_buffers(
     verts_handle: Res<BvhTriangleVerticesBuffer>,
     tri_mats_handle: Res<BvhTriMaterialsBuffer>,
     palette_handle: Res<BvhMaterialPaletteBuffer>,
+    tri_uvs_handle: Res<BvhTriUvsBuffer>,
+    mat_rects_handle: Res<BvhMaterialRectsBuffer>,
+    atlas_handle: Res<BvhAtlasBuffer>,
     world_bvh: Res<WorldBvh>,
 ) {
     if !world_bvh.is_added() && !world_bvh.is_changed() {
@@ -229,12 +239,40 @@ fn upload_bvh_buffers(
         buf.set_data(palette);
     }
 
+    let tri_uvs = if world_bvh.tri_uvs.is_empty() {
+        vec![Vec2::ZERO]
+    } else {
+        world_bvh.tri_uvs.clone()
+    };
+    let mat_rects = if world_bvh.material_rects.is_empty() {
+        vec![Vec4::new(0.0, 0.0, 1.0, 1.0)]
+    } else {
+        world_bvh.material_rects.clone()
+    };
+    let atlas_size = world_bvh.atlas_size.max(1);
+    let atlas_pixels = if world_bvh.atlas_pixels.is_empty() {
+        vec![0xFFFFFFFFu32; 1]
+    } else {
+        world_bvh.atlas_pixels.clone()
+    };
+
+    if let Some(buf) = buffers.get_mut(&tri_uvs_handle.0) {
+        buf.set_data(tri_uvs);
+    }
+    if let Some(buf) = buffers.get_mut(&mat_rects_handle.0) {
+        buf.set_data(mat_rects);
+    }
+    if let Some(buf) = buffers.get_mut(&atlas_handle.0) {
+        buf.set_data(atlas_pixels);
+    }
+
     info!(
-        "uploaded BVH to GPU: nodes={}, prim_indices={}, vertices={}, materials={}",
-        node_count, prim_count, vert_count, mat_count
+        "uploaded BVH to GPU: nodes={}, prim_indices={}, vertices={}, materials={}, atlas={}×{}",
+        node_count, prim_count, vert_count, mat_count, atlas_size, atlas_size
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
 fn upload_drone_state(
     mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
@@ -245,6 +283,7 @@ fn upload_drone_state(
     ui_state: Res<crate::ui::UiState>,
     settings: Res<LidarSettings>,
     comms: Res<CommsState>,
+    world_bvh: Option<Res<WorldBvh>>,
     mut sorted: Local<Vec<(u32, Vec3, Quat)>>,
     drones: Query<(&DroneId, &Transform), With<Drone>>,
 ) {
@@ -282,7 +321,10 @@ fn upload_drone_state(
             connected_mask_lo: comms.connected_mask[0],
             connected_mask_hi: comms.connected_mask[1],
             spray_use_albedo: settings.spray_use_albedo as u32,
-            _pad1: 0,
+            atlas_size_px: world_bvh
+                .as_deref()
+                .map(|b| b.atlas_size.max(1))
+                .unwrap_or(1),
         };
         buf.set_data(params);
     }

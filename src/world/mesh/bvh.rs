@@ -1,4 +1,4 @@
-use bevy::math::{Vec3, Vec3A};
+use bevy::math::{Vec2, Vec3, Vec3A};
 use bevy::prelude::*;
 use obvhs::cwbvh::{builder::build_cwbvh_from_tris, CwBvh};
 use obvhs::ray::{Ray, RayHit};
@@ -18,6 +18,18 @@ pub struct WorldBvh {
     /// Per-material flat albedo. `(r, g, b, a)` in linear space, ready
     /// for direct GPU sampling. Index by the values in `tri_materials`.
     pub material_palette: Vec<Vec4>,
+    /// Per-vertex UV0, flat layout: 3 × `Vec2` per triangle (uv0, uv1,
+    /// uv2), parallel to `triangles`.
+    pub tri_uvs: Vec<Vec2>,
+    /// Atlas pixel grid as packed RGBA8 `u32`. `atlas_size × atlas_size`
+    /// pixels in scanline order. The lidar shader samples this with a
+    /// per-material rect from `material_rects` + an interpolated UV.
+    pub atlas_pixels: Vec<u32>,
+    /// Edge length of the (square) atlas in pixels.
+    pub atlas_size: u32,
+    /// Per-material atlas rect, `(u_min, v_min, u_size, v_size)`,
+    /// normalised to `[0, 1]`. Indexed by `tri_materials[i]`.
+    pub material_rects: Vec<Vec4>,
 }
 
 /// Build a CWBVH8 from a triangle list using obvhs' medium-quality
@@ -28,18 +40,31 @@ pub struct WorldBvh {
 #[allow(dead_code)]
 pub fn build_world_bvh(triangles: Vec<Triangle>) -> WorldBvh {
     let n = triangles.len();
-    build_world_bvh_with_materials(triangles, vec![0u32; n], vec![Vec4::ONE])
+    build_world_bvh_with_materials(
+        triangles,
+        vec![Vec2::ZERO; n * 3],
+        vec![0u32; n],
+        vec![Vec4::ONE],
+        Vec::new(),
+        1,
+        vec![Vec4::new(0.0, 0.0, 1.0, 1.0)],
+    )
 }
 
-/// Full builder: triangles + per-triangle material indices + palette.
-/// `tri_materials.len()` must equal `triangles.len()` (one mat-id per
-/// unindexed triangle).
+/// Full builder. `tri_uvs.len()` must equal `3 * triangles.len()`;
+/// `tri_materials.len()` must equal `triangles.len()`.
+#[allow(clippy::too_many_arguments)]
 pub fn build_world_bvh_with_materials(
     triangles: Vec<Triangle>,
+    tri_uvs: Vec<Vec2>,
     tri_materials: Vec<u32>,
     material_palette: Vec<Vec4>,
+    atlas_pixels: Vec<u32>,
+    atlas_size: u32,
+    material_rects: Vec<Vec4>,
 ) -> WorldBvh {
     debug_assert_eq!(tri_materials.len(), triangles.len());
+    debug_assert_eq!(tri_uvs.len(), triangles.len() * 3);
     let cwbvh = build_cwbvh_from_tris(
         &triangles,
         BvhBuildParams::medium_build(),
@@ -50,6 +75,10 @@ pub fn build_world_bvh_with_materials(
         cwbvh,
         tri_materials,
         material_palette,
+        tri_uvs,
+        atlas_pixels,
+        atlas_size,
+        material_rects,
     }
 }
 

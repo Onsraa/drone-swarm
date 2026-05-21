@@ -1,38 +1,70 @@
-use bevy::math::{Mat4, Vec3, Vec3A};
+use bevy::math::{Mat4, Vec2, Vec3, Vec3A};
 use bevy::mesh::{Indices, Mesh, VertexAttributeValues};
 use obvhs::triangle::Triangle;
 
+/// Per-triangle UV0 coordinates, parallel to the triangle list
+/// returned by `extract_triangles_from_mesh`. Each entry holds the
+/// three vertex UVs in `(uv0, uv1, uv2)` order. Triangles whose mesh
+/// lacks a Float32x2 UV0 attribute fall back to `Vec2::ZERO`.
+pub type TriUvs = [Vec2; 3];
+
 /// Flatten a single Bevy `Mesh` into a Vec of `obvhs::Triangle` in world
-/// space. Returns an empty vec if the mesh lacks a Float32x3 position
-/// attribute or doesn't carry indices. Caller composes per-mesh `Mat4`
-/// from the parent SceneRoot's hierarchy.
-pub fn extract_triangles_from_mesh(mesh: &Mesh, transform: Mat4) -> Vec<Triangle> {
+/// space. Returns the triangles + parallel per-triangle UV0 (zeros if
+/// the mesh lacks UVs). Returns empty vecs if positions or indices are
+/// missing. Caller composes per-mesh `Mat4` from the parent
+/// SceneRoot's hierarchy.
+pub fn extract_triangles_from_mesh(
+    mesh: &Mesh,
+    transform: Mat4,
+) -> (Vec<Triangle>, Vec<TriUvs>) {
     let Some(positions) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
     let positions = match positions {
         VertexAttributeValues::Float32x3(v) => v,
-        _ => return Vec::new(),
+        _ => return (Vec::new(), Vec::new()),
     };
     let world_positions: Vec<Vec3A> = positions
         .iter()
         .map(|p| transform.transform_point3a(Vec3A::from_array(*p)))
         .collect();
 
+    let uvs: Option<&Vec<[f32; 2]>> = mesh
+        .attribute(Mesh::ATTRIBUTE_UV_0)
+        .and_then(|attr| match attr {
+            VertexAttributeValues::Float32x2(v) => Some(v),
+            _ => None,
+        });
+
     let indices: Vec<u32> = match mesh.indices() {
         Some(Indices::U32(v)) => v.clone(),
         Some(Indices::U16(v)) => v.iter().map(|i| *i as u32).collect(),
-        None => return Vec::new(),
+        None => return (Vec::new(), Vec::new()),
     };
 
-    indices
+    let tris: Vec<Triangle> = indices
         .chunks_exact(3)
         .map(|tri| Triangle {
             v0: world_positions[tri[0] as usize],
             v1: world_positions[tri[1] as usize],
             v2: world_positions[tri[2] as usize],
         })
-        .collect()
+        .collect();
+    let tri_uvs: Vec<TriUvs> = indices
+        .chunks_exact(3)
+        .map(|tri| {
+            if let Some(uvs) = uvs {
+                [
+                    Vec2::from_array(uvs[tri[0] as usize]),
+                    Vec2::from_array(uvs[tri[1] as usize]),
+                    Vec2::from_array(uvs[tri[2] as usize]),
+                ]
+            } else {
+                [Vec2::ZERO, Vec2::ZERO, Vec2::ZERO]
+            }
+        })
+        .collect();
+    (tris, tri_uvs)
 }
 
 /// Compute an AABB of the central percentile range of triangles,
@@ -134,15 +166,18 @@ mod tests {
     #[test]
     fn extracts_two_triangles_from_unit_quad() {
         let mesh = unit_quad_xz();
-        let tris = extract_triangles_from_mesh(&mesh, Mat4::IDENTITY);
+        let (tris, uvs) = extract_triangles_from_mesh(&mesh, Mat4::IDENTITY);
         assert_eq!(tris.len(), 2);
+        assert_eq!(uvs.len(), 2);
+        // No UV attribute on the test mesh -> fallback zeros.
+        assert_eq!(uvs[0], [Vec2::ZERO, Vec2::ZERO, Vec2::ZERO]);
     }
 
     #[test]
     fn applies_translation_to_vertices() {
         let mesh = unit_quad_xz();
         let xform = Mat4::from_translation(bevy::math::Vec3::new(10.0, 0.0, 0.0));
-        let tris = extract_triangles_from_mesh(&mesh, xform);
+        let (tris, _) = extract_triangles_from_mesh(&mesh, xform);
         assert_eq!(tris[0].v0, Vec3A::new(10.0, 0.0, 0.0));
         assert_eq!(tris[0].v1, Vec3A::new(11.0, 0.0, 0.0));
     }
@@ -154,8 +189,21 @@ mod tests {
             RenderAssetUsages::default(),
         );
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0, 0.0, 0.0]]);
-        let tris = extract_triangles_from_mesh(&mesh, Mat4::IDENTITY);
+        let (tris, _) = extract_triangles_from_mesh(&mesh, Mat4::IDENTITY);
         assert!(tris.is_empty());
+    }
+
+    #[test]
+    fn extracts_uvs_when_present() {
+        let mut mesh = unit_quad_xz();
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_UV_0,
+            vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        );
+        let (_, uvs) = extract_triangles_from_mesh(&mesh, Mat4::IDENTITY);
+        assert_eq!(uvs[0][0], Vec2::new(0.0, 0.0));
+        assert_eq!(uvs[0][1], Vec2::new(1.0, 0.0));
+        assert_eq!(uvs[0][2], Vec2::new(1.0, 1.0));
     }
 
     fn tri_at(centre: Vec3A, half: f32) -> Triangle {
@@ -209,7 +257,7 @@ mod tests {
         let _ = mesh.indices();
         // Swap to U16 to ensure widening path works.
         mesh.insert_indices(Indices::U16(vec![0, 1, 2]));
-        let tris = extract_triangles_from_mesh(&mesh, Mat4::IDENTITY);
+        let (tris, _) = extract_triangles_from_mesh(&mesh, Mat4::IDENTITY);
         assert_eq!(tris.len(), 1);
     }
 }

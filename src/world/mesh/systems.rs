@@ -5,7 +5,9 @@ use std::collections::HashMap;
 
 use super::bvh::{build_world_bvh_with_materials, recommended_transform, WorldBvh};
 use super::components::GroundTruthMesh;
-use super::constants::{AUTO_FIT_COVERAGE_RATIO, AUTO_FIT_TRIM_HIGH, AUTO_FIT_TRIM_LOW};
+use super::constants::{
+    ATLAS_TILE_PX, AUTO_FIT_COVERAGE_RATIO, AUTO_FIT_TRIM_HIGH, AUTO_FIT_TRIM_LOW,
+};
 use super::resources::MeshGroundTruthConfig;
 use super::triangles::{extract_triangles_from_mesh, percentile_trimmed_aabb};
 use crate::world::WorldConfig;
@@ -38,6 +40,143 @@ fn srgb_to_linear(c: f32) -> f32 {
     } else {
         ((c + 0.055) / 1.055).powf(2.4)
     }
+}
+
+/// Nearest-neighbour resample of an RGBA image into a `target × target`
+/// tile of `u8` bytes. Returns `None` for unsupported pixel formats;
+/// the caller falls back to a solid-tint fill. Used by the atlas baker
+/// to give each material a uniform `ATLAS_TILE_PX` slot. Linearises
+/// sRGB samples so the lidar shader can treat atlas pixels as linear
+/// albedo without per-fetch decoding.
+fn resample_image_linear_rgba(image: &Image, target: u32) -> Option<Vec<u8>> {
+    use bevy::render::render_resource::TextureFormat;
+    let data = image.data.as_deref()?;
+    let format = image.texture_descriptor.format;
+    let is_srgb = match format {
+        TextureFormat::Rgba8UnormSrgb => true,
+        TextureFormat::Rgba8Unorm => false,
+        _ => return None,
+    };
+    let src_w = image.texture_descriptor.size.width.max(1);
+    let src_h = image.texture_descriptor.size.height.max(1);
+    let target = target.max(1);
+    let mut out = vec![0u8; (target * target * 4) as usize];
+    for y in 0..target {
+        let sy = ((y as u64 * src_h as u64) / target as u64) as u32;
+        for x in 0..target {
+            let sx = ((x as u64 * src_w as u64) / target as u64) as u32;
+            let src_off = ((sy * src_w + sx) * 4) as usize;
+            let dst_off = ((y * target + x) * 4) as usize;
+            let mut r = data[src_off] as f32 / 255.0;
+            let mut g = data[src_off + 1] as f32 / 255.0;
+            let mut b = data[src_off + 2] as f32 / 255.0;
+            let a = data[src_off + 3];
+            if is_srgb {
+                r = srgb_to_linear(r);
+                g = srgb_to_linear(g);
+                b = srgb_to_linear(b);
+            }
+            out[dst_off] = (r.clamp(0.0, 1.0) * 255.0) as u8;
+            out[dst_off + 1] = (g.clamp(0.0, 1.0) * 255.0) as u8;
+            out[dst_off + 2] = (b.clamp(0.0, 1.0) * 255.0) as u8;
+            out[dst_off + 3] = a;
+        }
+    }
+    Some(out)
+}
+
+/// Bake all material textures into a square atlas + per-material UV
+/// rect table. Returns `(atlas_pixels, atlas_size_px, rects)`. Pixels
+/// are stored linear-RGBA8 packed into a single `u32` per pixel:
+/// `(a << 24) | (b << 16) | (g << 8) | r`. The lidar shader unpacks +
+/// multiplies by the per-material tint to get the final albedo.
+fn bake_atlas(
+    palette_handles: &[Option<Handle<StandardMaterial>>],
+    palette: &[Vec4],
+    materials: Option<&Assets<StandardMaterial>>,
+    images: Option<&Assets<Image>>,
+) -> (Vec<u32>, u32, Vec<Vec4>) {
+    let n = palette.len().max(1);
+    let grid = (n as f32).sqrt().ceil() as u32;
+    let tile = ATLAS_TILE_PX;
+    let atlas_size = grid * tile;
+    let total_pixels = (atlas_size * atlas_size) as usize;
+    let mut atlas: Vec<u32> = vec![pack_rgba(255, 255, 255, 255); total_pixels];
+    let mut rects = Vec::with_capacity(n);
+
+    for (i, handle_opt) in palette_handles.iter().enumerate() {
+        let gx = (i as u32) % grid;
+        let gy = (i as u32) / grid;
+        let dx = gx * tile;
+        let dy = gy * tile;
+
+        let tile_pixels = handle_opt
+            .as_ref()
+            .and_then(|h| materials.and_then(|m| m.get(h)))
+            .and_then(|m| {
+                m.base_color_texture
+                    .as_ref()
+                    .and_then(|t| images.and_then(|imgs| imgs.get(t)))
+            })
+            .and_then(|img| resample_image_linear_rgba(img, tile));
+
+        match tile_pixels {
+            Some(bytes) => {
+                // Multiply each pixel by the material tint then pack to u32.
+                let tint = palette[i];
+                for ty in 0..tile {
+                    let row_src = (ty * tile * 4) as usize;
+                    let row_dst = ((dy + ty) * atlas_size + dx) as usize;
+                    for tx in 0..tile {
+                        let s = row_src + (tx * 4) as usize;
+                        let r = (bytes[s] as f32 / 255.0 * tint.x).clamp(0.0, 1.0);
+                        let g = (bytes[s + 1] as f32 / 255.0 * tint.y).clamp(0.0, 1.0);
+                        let b = (bytes[s + 2] as f32 / 255.0 * tint.z).clamp(0.0, 1.0);
+                        let a = (bytes[s + 3] as f32 / 255.0 * tint.w).clamp(0.0, 1.0);
+                        let packed = pack_rgba(
+                            (r * 255.0) as u8,
+                            (g * 255.0) as u8,
+                            (b * 255.0) as u8,
+                            (a * 255.0) as u8,
+                        );
+                        atlas[row_dst + tx as usize] = packed;
+                    }
+                }
+            }
+            None => {
+                // Solid tint fill.
+                let tint = palette[i];
+                let packed = pack_rgba(
+                    (tint.x.clamp(0.0, 1.0) * 255.0) as u8,
+                    (tint.y.clamp(0.0, 1.0) * 255.0) as u8,
+                    (tint.z.clamp(0.0, 1.0) * 255.0) as u8,
+                    (tint.w.clamp(0.0, 1.0) * 255.0) as u8,
+                );
+                for ty in 0..tile {
+                    let row_dst = ((dy + ty) * atlas_size + dx) as usize;
+                    for tx in 0..tile {
+                        atlas[row_dst + tx as usize] = packed;
+                    }
+                }
+            }
+        }
+
+        let inv = 1.0 / atlas_size as f32;
+        let rect = Vec4::new(
+            dx as f32 * inv,
+            dy as f32 * inv,
+            tile as f32 * inv,
+            tile as f32 * inv,
+        );
+        rects.push(rect);
+    }
+
+    (atlas, atlas_size, rects)
+}
+
+#[inline]
+fn pack_rgba(r: u8, g: u8, b: u8, a: u8) -> u32 {
+    (a as u32) << 24 | (b as u32) << 16 | (g as u32) << 8 | r as u32
 }
 
 /// Downsampled mean of an RGBA image in linear space. Returns `None`
@@ -206,35 +345,45 @@ pub fn build_bvh_when_scene_ready(
     let images_opt = images.as_deref();
 
     let mut triangles: Vec<obvhs::triangle::Triangle> = Vec::new();
+    let mut tri_uvs: Vec<Vec2> = Vec::new();
     let mut tri_materials: Vec<u32> = Vec::new();
     let mut palette: Vec<Vec4> = Vec::new();
+    // Materials referenced by surviving triangles. Indexed by palette
+    // slot. We hold the `Handle<StandardMaterial>` so the atlas baker
+    // can re-fetch the source `base_color_texture` after the scene walk.
+    let mut palette_handles: Vec<Option<Handle<StandardMaterial>>> = Vec::new();
     let mut palette_lookup: HashMap<AssetId<StandardMaterial>, u32> = HashMap::new();
 
     let mut stack = vec![root];
     while let Some(entity) = stack.pop() {
         if let Ok((mesh3d, gx, mat)) = mesh_q.get(entity) {
             if let Some(mesh) = meshes.get(&mesh3d.0) {
-                let new_tris = extract_triangles_from_mesh(mesh, gx.to_matrix());
+                let (new_tris, new_uvs) = extract_triangles_from_mesh(mesh, gx.to_matrix());
                 if !new_tris.is_empty() {
                     let mat_id = match (mat, materials_opt) {
                         (Some(mat3d), Some(materials)) => {
                             let id = mat3d.0.id();
                             *palette_lookup.entry(id).or_insert_with(|| {
                                 palette.push(material_albedo(&mat3d.0, materials, images_opt));
+                                palette_handles.push(Some(mat3d.0.clone()));
                                 (palette.len() - 1) as u32
                             })
                         }
                         _ => {
-                            // Mesh without a StandardMaterial — slot in
-                            // a default white albedo at palette[0].
                             if palette.is_empty() {
                                 palette.push(Vec4::ONE);
+                                palette_handles.push(None);
                             }
                             0u32
                         }
                     };
                     let n = new_tris.len();
                     triangles.extend(new_tris);
+                    for uv in &new_uvs {
+                        tri_uvs.push(uv[0]);
+                        tri_uvs.push(uv[1]);
+                        tri_uvs.push(uv[2]);
+                    }
                     tri_materials.extend(std::iter::repeat(mat_id).take(n));
                 }
             }
@@ -258,11 +407,23 @@ pub fn build_bvh_when_scene_ready(
 
     let count = triangles.len();
     let mat_count = palette.len();
-    let bvh = build_world_bvh_with_materials(triangles, tri_materials, palette);
+    let (atlas_pixels, atlas_size, material_rects) =
+        bake_atlas(&palette_handles, &palette, materials_opt, images_opt);
+    let bvh = build_world_bvh_with_materials(
+        triangles,
+        tri_uvs,
+        tri_materials,
+        palette,
+        atlas_pixels,
+        atlas_size,
+        material_rects,
+    );
     info!(
-        "built ground-truth BVH from {} triangles, {} materials, full aabb min=({:.1},{:.1},{:.1}) max=({:.1},{:.1},{:.1}), trimmed min=({:.1},{:.1},{:.1}) max=({:.1},{:.1},{:.1})",
+        "built ground-truth BVH from {} triangles, {} materials, atlas {}×{} px, full aabb min=({:.1},{:.1},{:.1}) max=({:.1},{:.1},{:.1}), trimmed min=({:.1},{:.1},{:.1}) max=({:.1},{:.1},{:.1})",
         count,
         mat_count,
+        atlas_size,
+        atlas_size,
         bvh.cwbvh.total_aabb.min.x,
         bvh.cwbvh.total_aabb.min.y,
         bvh.cwbvh.total_aabb.min.z,

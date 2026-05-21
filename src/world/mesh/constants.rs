@@ -23,3 +23,10 @@ pub const AUTO_FIT_COVERAGE_RATIO: f32 = 0.8;
 /// helpers, stray vertices that would otherwise bloat the AABB.
 pub const AUTO_FIT_TRIM_LOW: f32 = 0.05;
 pub const AUTO_FIT_TRIM_HIGH: f32 = 0.95;
+
+/// Per-material tile size (pixels) in the lidar-sample atlas. Each
+/// material gets a `ATLAS_TILE_PX × ATLAS_TILE_PX` slot in a square
+/// grid. Source textures are nearest-neighbour resampled to that size.
+/// 256 keeps the atlas <= 4 MB at the 9-material city scene (3×3 grid
+/// of 256² = 768² × 4 B = 2.3 MB).
+pub const ATLAS_TILE_PX: u32 = 256;

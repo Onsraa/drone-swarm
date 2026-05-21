@@ -76,7 +76,8 @@ pub struct LidarParams {
     pub connected_mask_hi: u32,
     /// `1` -> spray points coloured by mesh albedo; `0` -> drone tint.
     pub spray_use_albedo: u32,
-    pub _pad1: u32,
+    /// Edge length of the square material atlas in pixels.
+    pub atlas_size_px: u32,
 }
 
 /// Mirrors the WGSL `BuildParams` struct used by `build_local_instances`,
@@ -184,9 +185,27 @@ pub struct BvhTriangleVerticesBuffer(pub Handle<ShaderStorageBuffer>);
 pub struct BvhTriMaterialsBuffer(pub Handle<ShaderStorageBuffer>);
 
 /// Per-material flat albedo (`array<vec4<f32>>`, RGBA in linear
-/// space). Indexed by the values in `BvhTriMaterialsBuffer`.
+/// space). Indexed by the values in `BvhTriMaterialsBuffer`. Used as
+/// a tint when no atlas is bound; the atlas baker already pre-multiplies
+/// this into each tile, so the shader can skip the multiply at sample
+/// time.
 #[derive(Resource, ExtractResource, Clone)]
 pub struct BvhMaterialPaletteBuffer(pub Handle<ShaderStorageBuffer>);
+
+/// Per-vertex UV0 (flat `array<vec2<f32>>`, 3 entries per triangle in
+/// `(uv0, uv1, uv2)` order).
+#[derive(Resource, ExtractResource, Clone)]
+pub struct BvhTriUvsBuffer(pub Handle<ShaderStorageBuffer>);
+
+/// Per-material atlas rect (`array<vec4<f32>>`,
+/// `(u_min, v_min, u_size, v_size)` normalised to `[0, 1]`).
+#[derive(Resource, ExtractResource, Clone)]
+pub struct BvhMaterialRectsBuffer(pub Handle<ShaderStorageBuffer>);
+
+/// Atlas pixel data, packed RGBA8 in a single `u32` per pixel. Layout
+/// is scanline-order, `params.atlas_size_px × params.atlas_size_px`.
+#[derive(Resource, ExtractResource, Clone)]
+pub struct BvhAtlasBuffer(pub Handle<ShaderStorageBuffer>);
 
 /// One-shot startup: allocates every lidar input/output buffer.
 /// Positions and params start zeroed; the per-frame `upload_drone_*`
@@ -209,7 +228,7 @@ pub fn setup_gpu_lidar_assets(
         connected_mask_lo: u32::MAX,
         connected_mask_hi: u32::MAX,
         spray_use_albedo: 0,
-        _pad1: 0,
+        atlas_size_px: 1,
     };
     let mut params_buf = ShaderStorageBuffer::from(params);
     params_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
@@ -360,6 +379,21 @@ pub fn setup_gpu_lidar_assets(
     bvh_palette_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
     let bvh_palette_handle = buffers.add(bvh_palette_buf);
 
+    // `array<vec2<f32>>`. Vec4 padding here is OK because we re-set
+    // the buffer length on first upload anyway.
+    let mut bvh_tri_uvs_buf = ShaderStorageBuffer::from(vec![Vec2::ZERO]);
+    bvh_tri_uvs_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let bvh_tri_uvs_handle = buffers.add(bvh_tri_uvs_buf);
+
+    let mut bvh_mat_rects_buf =
+        ShaderStorageBuffer::from(vec![Vec4::new(0.0, 0.0, 1.0, 1.0)]);
+    bvh_mat_rects_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let bvh_mat_rects_handle = buffers.add(bvh_mat_rects_buf);
+
+    let mut bvh_atlas_buf = ShaderStorageBuffer::from(vec![0xFFFFFFFFu32; 1]);
+    bvh_atlas_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let bvh_atlas_handle = buffers.add(bvh_atlas_buf);
+
     info!(
         "GPU lidar buffers allocated: {} drone slots, {} rays/scan, {} steps/ray, {} occupancy u32s ({} words/drone)",
         MAX_DRONES_GPU,
@@ -394,5 +428,8 @@ pub fn setup_gpu_lidar_assets(
     commands.insert_resource(BvhTriangleVerticesBuffer(bvh_verts_handle));
     commands.insert_resource(BvhTriMaterialsBuffer(bvh_tri_mats_handle));
     commands.insert_resource(BvhMaterialPaletteBuffer(bvh_palette_handle));
+    commands.insert_resource(BvhTriUvsBuffer(bvh_tri_uvs_handle));
+    commands.insert_resource(BvhMaterialRectsBuffer(bvh_mat_rects_handle));
+    commands.insert_resource(BvhAtlasBuffer(bvh_atlas_handle));
     commands.insert_resource(RoleConeRanges(role_ranges));
 }
