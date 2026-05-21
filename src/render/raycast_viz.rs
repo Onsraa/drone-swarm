@@ -13,9 +13,9 @@ use bevy::prelude::*;
 use crate::drone::{Drone, DroneColor};
 use crate::exploration::{Role, RoleParams};
 use crate::lidar::sampling::{fibonacci_cone, SCOUT_LIDAR_TILT_DOWN_RAD};
-use crate::sensors::{raycast_dda, DetectorHits};
+use crate::sensors::DetectorHits;
 use crate::ui::UiState;
-use crate::world::{GroundTruthMap, WorldConfig};
+use crate::world::{raycast_bvh, WorldBvh, WorldConfig};
 
 /// Per-role mapping-lidar viz dirs (BODY frame, forward = -Z). Smaller
 /// ray count than the GPU mapping lidar so the gizmo overlay stays
@@ -84,7 +84,7 @@ pub fn draw_detector_rays(
 
 pub fn draw_lidar_rays(
     ui_state: Res<UiState>,
-    ground: Option<Res<GroundTruthMap>>,
+    bvh: Option<Res<WorldBvh>>,
     config: Option<Res<WorldConfig>>,
     rays: Res<LidarVizRays>,
     mut gizmos: Gizmos,
@@ -93,7 +93,7 @@ pub fn draw_lidar_rays(
     if !ui_state.show_lidar_rays {
         return;
     }
-    let (Some(ground), Some(config)) = (ground, config) else {
+    let (Some(bvh), Some(config)) = (bvh, config) else {
         return;
     };
     let voxel = config.voxel_size;
@@ -116,8 +116,7 @@ pub fn draw_lidar_rays(
 
         for d in dirs.iter() {
             let dir_world = rot * (*d);
-            let (endpoint, _hit) =
-                raycast_dda(origin, dir_world, max_range, &ground, voxel);
+            let (endpoint, _hit) = raycast_bvh(&bvh, origin, dir_world, max_range);
             gizmos.line(origin, endpoint, line_color);
         }
     }

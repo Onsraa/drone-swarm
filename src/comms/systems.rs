@@ -2,10 +2,13 @@ use bevy::color::palettes::tailwind;
 use bevy::prelude::*;
 
 use crate::drone::{Drone, DroneId};
-use crate::world::{GroundTruthMap, WorldConfig};
+use crate::world::{ground_altitude, GroundTruthMap, WorldBvh, WorldConfig};
 
 use super::constants::BASE_DEFAULT_HEIGHT_M;
 use super::resources::{CommsSettings, CommsState};
+
+const COMMS_SKY_CAST_Y: f32 = 2000.0;
+const COMMS_BASE_CLEARANCE_M: f32 = 1.0;
 
 /// BFS over the drone positions. Seed with drones within `range_m` of
 /// the base, then walk the peer graph (each edge = pair of drones within
@@ -15,21 +18,24 @@ pub fn compute_connectivity(
     settings: Res<CommsSettings>,
     world: Res<WorldConfig>,
     map: Option<Res<GroundTruthMap>>,
+    bvh: Option<Res<WorldBvh>>,
     drones: Query<(&DroneId, &Transform), With<Drone>>,
     mut state: ResMut<CommsState>,
 ) {
     let center = world.center();
-    // Base sits at the center column. Use the same terrain-aware
-    // helper drones use for their spawn: walk the column upward,
-    // pick the first cell with 4 clear cells above it. Falls back
-    // to the legacy 1 m default when no map is loaded or the
-    // column is fully blocked.
-    let cell_x = (center.x / world.voxel_size).floor() as i32;
-    let cell_z = (center.z / world.voxel_size).floor() as i32;
-    let base_y = map
+    // Base altitude priority: BVH sky-cast (when the mesh ground truth
+    // is built) > voxel safe-spawn helper > BASE_DEFAULT_HEIGHT_M.
+    let base_y = bvh
         .as_deref()
-        .and_then(|m| m.safe_spawn_cell_y(cell_x, cell_z, 4))
-        .map(|cy| (cy as f32 + 0.5) * world.voxel_size + 1.0)
+        .and_then(|b| ground_altitude(b, center.x, center.z, COMMS_SKY_CAST_Y))
+        .map(|gy| gy + COMMS_BASE_CLEARANCE_M)
+        .or_else(|| {
+            let cell_x = (center.x / world.voxel_size).floor() as i32;
+            let cell_z = (center.z / world.voxel_size).floor() as i32;
+            map.as_deref()
+                .and_then(|m| m.safe_spawn_cell_y(cell_x, cell_z, 4))
+                .map(|cy| (cy as f32 + 0.5) * world.voxel_size + 1.0)
+        })
         .unwrap_or(BASE_DEFAULT_HEIGHT_M);
     let base_pos = Vec3::new(center.x, base_y, center.z);
     state.base_pos = base_pos;

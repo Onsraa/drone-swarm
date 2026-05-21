@@ -14,7 +14,7 @@ use bevy::prelude::*;
 
 use crate::drone::Drone;
 use crate::exploration::Role;
-use crate::world::{GroundTruthMap, WorldConfig};
+use crate::world::{raycast_bvh, WorldBvh};
 
 pub struct SensorsPlugin;
 
@@ -106,15 +106,19 @@ pub fn dirs_for_role<'a>(role: Role, rays: &'a DetectorRays) -> &'a [Vec3] {
 }
 
 fn update_detector_hits(
-    ground: Option<Res<GroundTruthMap>>,
-    config: Option<Res<WorldConfig>>,
+    bvh: Option<Res<WorldBvh>>,
     rays: Res<DetectorRays>,
     mut q: Query<(&Transform, &Role, &mut DetectorHits), With<Drone>>,
 ) {
-    let (Some(ground), Some(config)) = (ground, config) else {
+    let Some(bvh) = bvh else {
+        // No mesh BVH yet — clear hits so steering doesn't act on
+        // stale data from a previous frame.
+        for (_, _, mut hits) in &mut q {
+            hits.endpoints.clear();
+            hits.is_hit.clear();
+        }
         return;
     };
-    let voxel = config.voxel_size;
     for (transform, role, mut hits) in &mut q {
         let dirs = dirs_for_role(*role, &rays);
         let max_range = detector_range_for(*role);
@@ -126,36 +130,9 @@ fn update_detector_hits(
         hits.is_hit.reserve(dirs.len());
         for d in dirs {
             let dir_world = rot * (*d);
-            let (endpoint, hit) =
-                raycast_dda(origin, dir_world, max_range, &ground, voxel);
+            let (endpoint, hit) = raycast_bvh(&bvh, origin, dir_world, max_range);
             hits.endpoints.push(endpoint);
             hits.is_hit.push(hit);
         }
     }
-}
-
-/// Half-voxel-step DDA. Returns `(endpoint, hit)` — endpoint is the
-/// first Occupied cell along the ray or `origin + dir * max_dist` on
-/// miss; hit is whether we actually struck.
-pub fn raycast_dda(
-    origin: Vec3,
-    dir: Vec3,
-    max_dist: f32,
-    ground: &GroundTruthMap,
-    voxel: f32,
-) -> (Vec3, bool) {
-    let step = voxel * 0.5;
-    let n_steps = (max_dist / step) as usize + 1;
-    for i in 1..=n_steps {
-        let t = i as f32 * step;
-        if t > max_dist {
-            return (origin + dir * max_dist, false);
-        }
-        let p = origin + dir * t;
-        let cell = (p / voxel).floor().as_ivec3();
-        if ground.get(cell) {
-            return (p, true);
-        }
-    }
-    (origin + dir * max_dist, false)
 }

@@ -91,6 +91,24 @@ pub fn ground_altitude(bvh: &WorldBvh, x: f32, z: f32, sky_y: f32) -> Option<f32
     Some(sky_y - t)
 }
 
+/// Cast a ray with a finite maximum distance. Returns `(endpoint, hit)`
+/// where `endpoint` is the world position of the first hit (when
+/// `hit == true`) or `origin + unit_dir * max_dist` on miss. Direction
+/// is normalized internally; `Vec3::ZERO` returns `(origin, false)`.
+/// Same `(endpoint, hit)` contract as the legacy `raycast_dda`.
+pub fn raycast_bvh(bvh: &WorldBvh, origin: Vec3, dir: Vec3, max_dist: f32) -> (Vec3, bool) {
+    let unit_dir = dir.normalize_or_zero();
+    if unit_dir == Vec3::ZERO {
+        return (origin, false);
+    }
+    if let Some(t) = cast_ray(bvh, origin, unit_dir) {
+        if t <= max_dist {
+            return (origin + unit_dir * t, true);
+        }
+    }
+    (origin + unit_dir * max_dist, false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,6 +217,42 @@ mod tests {
         // horiz_extent = 512 = target -> scale_mult = 1.0 -> new_scale = cur_s
         assert!((s - cur_s).abs() < 0.01, "scale should be stable: {} vs {}", s, cur_s);
         assert_vec3_near(t, cur_t, 0.5);
+    }
+
+    #[test]
+    fn raycast_bvh_within_range_returns_hit() {
+        let tri = Triangle {
+            v0: Vec3A::new(0.0, 10.0, 0.0),
+            v1: Vec3A::new(2.0, 10.0, 0.0),
+            v2: Vec3A::new(0.0, 10.0, 2.0),
+        };
+        let bvh = build_world_bvh(vec![tri]);
+        let (endpoint, hit) = raycast_bvh(
+            &bvh,
+            Vec3::new(0.25, 30.0, 0.25),
+            Vec3::NEG_Y,
+            100.0,
+        );
+        assert!(hit);
+        assert!((endpoint.y - 10.0).abs() < 1e-3, "endpoint = {:?}", endpoint);
+    }
+
+    #[test]
+    fn raycast_bvh_beyond_max_dist_returns_miss() {
+        let tri = Triangle {
+            v0: Vec3A::new(0.0, 10.0, 0.0),
+            v1: Vec3A::new(2.0, 10.0, 0.0),
+            v2: Vec3A::new(0.0, 10.0, 2.0),
+        };
+        let bvh = build_world_bvh(vec![tri]);
+        let (endpoint, hit) = raycast_bvh(
+            &bvh,
+            Vec3::new(0.25, 30.0, 0.25),
+            Vec3::NEG_Y,
+            5.0,
+        );
+        assert!(!hit);
+        assert!((endpoint.y - 25.0).abs() < 1e-3, "endpoint = {:?}", endpoint);
     }
 
     #[test]

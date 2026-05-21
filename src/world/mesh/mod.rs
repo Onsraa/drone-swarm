@@ -7,7 +7,7 @@ mod triangles;
 
 use bevy::prelude::*;
 
-pub use bvh::{ground_altitude, WorldBvh};
+pub use bvh::{ground_altitude, raycast_bvh, WorldBvh};
 pub use resources::MeshGroundTruthConfig;
 
 pub struct MeshGroundTruthPlugin;
