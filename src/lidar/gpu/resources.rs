@@ -81,6 +81,10 @@ pub struct LidarParams {
     pub spray_use_albedo: u32,
     /// Edge length of the square material atlas in pixels.
     pub atlas_size_px: u32,
+    /// Current `LidarFrameCounter`. The shader gates per drone on
+    /// `(frame + drone_idx) % drone_scan.scan_interval`.
+    pub frame: u32,
+    pub _pad: u32,
 }
 
 /// Mirrors the WGSL `BuildParams` struct used by `build_local_instances`,
@@ -232,6 +236,8 @@ pub fn setup_gpu_lidar_assets(
         connected_mask_hi: u32::MAX,
         spray_use_albedo: 0,
         atlas_size_px: 1,
+        frame: 0,
+        _pad: 0,
     };
     let mut params_buf = ShaderStorageBuffer::from(params);
     params_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;

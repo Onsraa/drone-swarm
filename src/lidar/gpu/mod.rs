@@ -284,6 +284,7 @@ fn upload_drone_state(
     settings: Res<LidarSettings>,
     comms: Res<CommsState>,
     world_bvh: Option<Res<WorldBvh>>,
+    frame: Res<LidarFrameCounter>,
     mut sorted: Local<Vec<(u32, Vec3, Quat)>>,
     drones: Query<(&DroneId, &Transform), With<Drone>>,
 ) {
@@ -325,6 +326,8 @@ fn upload_drone_state(
                 .as_deref()
                 .map(|b| b.atlas_size.max(1))
                 .unwrap_or(1),
+            frame: frame.0,
+            _pad: 0,
         };
         buf.set_data(params);
     }

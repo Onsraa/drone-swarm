@@ -22,6 +22,8 @@ struct LidarParams {
     connected_mask_hi: u32,
     spray_use_albedo: u32,
     atlas_size_px: u32,
+    frame: u32,
+    _pad: u32,
 };
 
 struct DroneScanParams {
@@ -370,6 +372,15 @@ fn lidar_bvh(@builtin(global_invocation_id) gid: vec3<u32>) {
     let scan = drone_scan[drone_idx];
     let ray_local_idx = gid.y;
     if (ray_local_idx >= scan.ray_count) { return; }
+
+    // Per-drone scan-interval gating. Stagger via `+ drone_idx` so
+    // same-role drones (which share `scan_interval`) don't all fire
+    // their scan on the same frame -- spreads atomicOr / point-buffer
+    // pressure across consecutive frames.
+    let interval = max(scan.scan_interval, 1u);
+    if (((params.frame + drone_idx) % interval) != 0u) {
+        return;
+    }
 
     let ray_buf_idx = scan.ray_offset + ray_local_idx;
     let local_dir = ray_dirs[ray_buf_idx].xyz;

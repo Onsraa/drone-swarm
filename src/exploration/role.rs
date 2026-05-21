@@ -20,6 +20,12 @@ pub struct RoleParams {
     pub max_range_cells: u32,
     pub rays_per_scan: u32,
     pub scan_interval_frames: u32,
+    /// Per-role detector (short-range CPU raycast) period in frames.
+    /// `update_detector_hits` skips a drone when `(frame + drone_id) %
+    /// detector_interval_frames != 0`, leaving its last `DetectorHits`
+    /// in place. Scouts cruise fast so they probe every frame; Mappers
+    /// + Anchors move slowly and can afford every-other-frame.
+    pub detector_interval_frames: u32,
     /// Terrain (lidar-hit) repulsion stiffness for `reactive_force`.
     /// Peer-peer repulsion uses the pair-wise `peer_repulsion_for`
     /// table instead so right-of-way can be asymmetric.
@@ -53,6 +59,7 @@ impl RoleParams {
                 max_range_cells: 160,
                 rays_per_scan: 32,
                 scan_interval_frames: 2,
+                detector_interval_frames: 1,
                 avoid_k: 12.0,
                 tint: [1.0, 0.85, 0.2, 0.85],
             },
@@ -65,6 +72,7 @@ impl RoleParams {
                 max_range_cells: 64,
                 rays_per_scan: 192,
                 scan_interval_frames: 1,
+                detector_interval_frames: 2,
                 avoid_k: 16.0,
                 tint: [0.3, 0.8, 0.35, 0.85],
             },
@@ -80,6 +88,7 @@ impl RoleParams {
                 max_range_cells: 128,
                 rays_per_scan: 0,
                 scan_interval_frames: 3,
+                detector_interval_frames: 2,
                 avoid_k: 20.0,
                 tint: [0.92, 0.95, 1.0, 0.85],
             },

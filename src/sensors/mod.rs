@@ -12,8 +12,9 @@
 
 use bevy::prelude::*;
 
-use crate::drone::Drone;
-use crate::exploration::Role;
+use crate::drone::{Drone, DroneId};
+use crate::exploration::{Role, RoleParams};
+use crate::lidar::LidarFrameCounter;
 use crate::world::{raycast_bvh, WorldBvh};
 
 pub struct SensorsPlugin;
@@ -107,19 +108,29 @@ pub fn dirs_for_role<'a>(role: Role, rays: &'a DetectorRays) -> &'a [Vec3] {
 
 fn update_detector_hits(
     bvh: Option<Res<WorldBvh>>,
+    frame: Res<LidarFrameCounter>,
     rays: Res<DetectorRays>,
-    mut q: Query<(&Transform, &Role, &mut DetectorHits), With<Drone>>,
+    mut q: Query<(&DroneId, &Transform, &Role, &mut DetectorHits), With<Drone>>,
 ) {
     let Some(bvh) = bvh else {
         // No mesh BVH yet — clear hits so steering doesn't act on
         // stale data from a previous frame.
-        for (_, _, mut hits) in &mut q {
+        for (_, _, _, mut hits) in &mut q {
             hits.endpoints.clear();
             hits.is_hit.clear();
         }
         return;
     };
-    for (transform, role, mut hits) in &mut q {
+    for (id, transform, role, mut hits) in &mut q {
+        let interval = RoleParams::for_role(*role)
+            .detector_interval_frames
+            .max(1);
+        // Stagger via `+ id.0` so same-role drones don't all skip the
+        // same frame -- spreads CPU raycast load evenly. Skipped frames
+        // keep the previous `DetectorHits` for steering use.
+        if (frame.0.wrapping_add(id.0)) % interval != 0 {
+            continue;
+        }
         let dirs = dirs_for_role(*role, &rays);
         let max_range = detector_range_for(*role);
         let origin = transform.translation;

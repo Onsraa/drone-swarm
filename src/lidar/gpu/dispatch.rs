@@ -20,7 +20,7 @@ use super::resources::{
     LidarPointVecBuffer, LocalActiveCellsBuffer, LocalActiveCountBuffer, LocalOccupancyBuffer,
     RayDirsBuffer, MAX_DRONES_GPU,
 };
-use crate::lidar::{LidarFrameCounter, LidarSettings};
+use crate::lidar::LidarSettings;
 
 /// Per-frame SystemParam bundle for the BVH bind-group prep system.
 /// Keeps the function under Bevy's 16-parameter system limit by
@@ -202,14 +202,9 @@ impl render_graph::Node for ComputeLidarBvhNode {
             .get_resource::<LidarSettings>()
             .copied()
             .unwrap_or_default();
-        let frame = world
-            .get_resource::<LidarFrameCounter>()
-            .map(|c| c.0)
-            .unwrap_or(0);
-        let interval = settings.scan_interval_frames.max(1);
-        if frame % interval != 0 {
-            return Ok(());
-        }
+        // Per-drone scan-interval gating now lives in the shader
+        // (reads `drone_scan[i].scan_interval` against the frame
+        // counter in `LidarParams`). The dispatch fires every frame.
         let buffers = world.resource::<RenderAssets<GpuShaderStorageBuffer>>();
         let Some(point_count_handle) = world.get_resource::<LidarPointCountBuffer>() else {
             return Ok(());
