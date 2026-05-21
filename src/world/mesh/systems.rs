@@ -15,23 +15,17 @@ use crate::world::WorldConfig;
 fn material_albedo(
     handle: &Handle<StandardMaterial>,
     materials: &Assets<StandardMaterial>,
-    images: Option<&Assets<Image>>,
+    _images: Option<&Assets<Image>>,
 ) -> Vec4 {
     let Some(mat) = materials.get(handle) else {
         return Vec4::ONE;
     };
-    let tint = {
-        let lin = mat.base_color.to_linear();
-        Vec4::new(lin.red, lin.green, lin.blue, lin.alpha)
-    };
-    if let (Some(tex_handle), Some(images)) = (&mat.base_color_texture, images) {
-        if let Some(image) = images.get(tex_handle) {
-            if let Some(mean) = image_mean_linear(image) {
-                return mean * tint;
-            }
-        }
-    }
-    tint
+    // Return the raw linear `base_color` only. The atlas baker
+    // multiplies tile pixels by this once at bake time; sampling the
+    // texture mean here too would double-multiply when the atlas
+    // resolves to a real pixel sample.
+    let lin = mat.base_color.to_linear();
+    Vec4::new(lin.red, lin.green, lin.blue, lin.alpha)
 }
 
 fn srgb_to_linear(c: f32) -> f32 {
@@ -179,6 +173,7 @@ fn pack_rgba(r: u8, g: u8, b: u8, a: u8) -> u32 {
     (a as u32) << 24 | (b as u32) << 16 | (g as u32) << 8 | r as u32
 }
 
+#[allow(dead_code)]
 /// Downsampled mean of an RGBA image in linear space. Returns `None`
 /// for unsupported pixel formats; the caller falls back to the
 /// material's flat `base_color` tint. Decimates the pixel walk to
@@ -343,6 +338,38 @@ pub fn build_bvh_when_scene_ready(
     };
     let materials_opt = materials.as_deref();
     let images_opt = images.as_deref();
+
+    // Defer build until every material's base_color_texture is in
+    // Assets<Image>. Atlas baking before textures load would emit
+    // solid-tint tiles (typically all white for glTF cities where
+    // base_color = WHITE + the actual colour lives in the texture).
+    if let (Some(materials), Some(images)) = (materials_opt, images_opt) {
+        let mut pending = 0usize;
+        let mut stack = vec![root];
+        while let Some(entity) = stack.pop() {
+            if let Ok((_, _, Some(mat3d))) = mesh_q.get(entity) {
+                if let Some(mat) = materials.get(&mat3d.0) {
+                    if let Some(tex) = &mat.base_color_texture {
+                        if images.get(tex).is_none() {
+                            pending += 1;
+                        }
+                    }
+                }
+            }
+            if let Ok(children) = children_q.get(entity) {
+                for c in children.iter() {
+                    stack.push(c);
+                }
+            }
+        }
+        if pending > 0 {
+            debug!(
+                "BVH build deferred: {} base_color_textures still loading",
+                pending
+            );
+            return;
+        }
+    }
 
     let mut triangles: Vec<obvhs::triangle::Triangle> = Vec::new();
     let mut tri_uvs: Vec<Vec2> = Vec::new();
