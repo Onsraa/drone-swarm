@@ -33,7 +33,7 @@ use physics::PhysicsPlugin;
 use render::VoxelRenderPlugin;
 use sensors::SensorsPlugin;
 use ui::UiPlugin;
-use world::WorldPlugin;
+use world::{MeshGroundTruthPlugin, WorldPlugin};
 
 fn main() {
     App::new()
@@ -50,6 +50,7 @@ fn main() {
         .add_plugins(EguiPlugin::default())
         .add_plugins(MapsPlugin)
         .add_plugins(WorldPlugin)
+        .add_plugins(MeshGroundTruthPlugin)
         .add_plugins(LightingPlugin)
         .add_plugins(VoxelRenderPlugin)
         .add_plugins(PhysicsPlugin)

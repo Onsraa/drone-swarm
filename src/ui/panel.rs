@@ -9,7 +9,7 @@ use crate::exploration::Role;
 use crate::groups::DroneGroupPresets;
 use crate::lidar::{gpu::GpuGlobalStats, LidarSettings};
 use crate::maps::{AvailableMaps, MapSwapRequested};
-use crate::world::WorldConfig;
+use crate::world::{MeshGroundTruthConfig, WorldConfig};
 
 use super::constants::SIDE_PANEL_DEFAULT_WIDTH;
 use super::resources::UiState;
@@ -30,6 +30,7 @@ pub fn draw_ui(
     drones_q: Query<(&DroneId, &DroneColor, &Role), With<Drone>>,
     gpu_stats: Res<GpuGlobalStats>,
     world: Res<WorldConfig>,
+    mut mesh_gt: ResMut<MeshGroundTruthConfig>,
     diagnostics: Res<DiagnosticsStore>,
 ) -> Result {
     let fps = diagnostics
@@ -49,7 +50,8 @@ pub fn draw_ui(
             ui.separator();
 
             ui.label("Layers");
-            ui.checkbox(&mut state.show_ground_truth, "Show ground truth (debug)");
+            ui.checkbox(&mut state.show_ground_truth, "Show ground truth cubes (debug)");
+            ui.checkbox(&mut mesh_gt.visible, "Show ground truth mesh");
             ui.checkbox(&mut state.show_local_maps, "Show drone local maps");
             ui.checkbox(&mut state.show_global_map, "Show central map");
             ui.checkbox(&mut state.show_lidar_points, "Show lidar spray (GPU points)");
