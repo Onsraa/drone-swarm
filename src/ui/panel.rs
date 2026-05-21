@@ -10,7 +10,7 @@ use crate::exploration::Role;
 use crate::groups::DroneGroupPresets;
 use crate::lidar::{gpu::GpuGlobalStats, LidarSettings, LidarSourceMode};
 use crate::maps::{AvailableMaps, MapSwapRequested};
-use crate::world::{MeshGroundTruthConfig, WorldConfig};
+use crate::world::{MeshGroundTruthConfig, WorldBvh, WorldConfig};
 
 use super::constants::SIDE_PANEL_DEFAULT_WIDTH;
 use super::resources::{UiPointerCapture, UiState};
@@ -22,6 +22,7 @@ pub struct PanelToggles<'w> {
     pub mesh_gt: ResMut<'w, MeshGroundTruthConfig>,
     pub lidar_mode: ResMut<'w, LidarSourceMode>,
     pub pointer_capture: ResMut<'w, UiPointerCapture>,
+    pub world_bvh: Option<Res<'w, WorldBvh>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -105,34 +106,60 @@ pub fn draw_ui(
                     ui.separator();
 
                     ui.label("Ground truth mesh");
+                    if let Some(bvh) = toggles.world_bvh.as_ref() {
+                        let aabb = &bvh.cwbvh.total_aabb;
+                        let ext_x = aabb.max.x - aabb.min.x;
+                        let ext_y = aabb.max.y - aabb.min.y;
+                        let ext_z = aabb.max.z - aabb.min.z;
+                        ui.label(format!(
+                            "  AABB: X {:.1} | Y {:.1} | Z {:.1}",
+                            ext_x, ext_y, ext_z
+                        ));
+                        ui.label(format!(
+                            "  min Y {:.1} | max Y {:.1}",
+                            aabb.min.y, aabb.max.y
+                        ));
+                    } else {
+                        ui.label("  AABB: (no BVH yet)");
+                    }
+                    ui.checkbox(
+                        &mut toggles.mesh_gt.auto_fit_on_first_build,
+                        "Auto-fit on next load",
+                    );
                     ui.add(
                         egui::Slider::new(
                             &mut toggles.mesh_gt.translation.x,
-                            0.0..=640.0,
+                            -640.0..=1280.0,
                         )
                         .text("pos X"),
                     );
                     ui.add(
                         egui::Slider::new(
                             &mut toggles.mesh_gt.translation.y,
-                            -20.0..=40.0,
+                            -40.0..=80.0,
                         )
                         .text("pos Y"),
                     );
                     ui.add(
                         egui::Slider::new(
                             &mut toggles.mesh_gt.translation.z,
-                            0.0..=640.0,
+                            -640.0..=1280.0,
                         )
                         .text("pos Z"),
                     );
                     ui.add(
-                        egui::Slider::new(&mut toggles.mesh_gt.scale, 0.1..=20.0)
+                        egui::Slider::new(&mut toggles.mesh_gt.scale, 0.1..=200.0)
                             .text("scale"),
                     );
-                    if ui.button("Apply (respawn + rebuild BVH)").clicked() {
-                        toggles.mesh_gt.apply_requested = true;
-                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("Apply (respawn + rebuild BVH)").clicked() {
+                            toggles.mesh_gt.apply_requested = true;
+                        }
+                        if ui.button("Recompute auto-fit").clicked() {
+                            toggles.mesh_gt.auto_fit_on_first_build = true;
+                            toggles.mesh_gt.apply_requested = true;
+                        }
+                    });
                     ui.separator();
 
                     draw_comms_controls(ui, &mut comms_settings, &comms_state);

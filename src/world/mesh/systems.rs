@@ -1,10 +1,12 @@
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
 
-use super::bvh::{build_world_bvh, WorldBvh};
+use super::bvh::{build_world_bvh, recommended_transform, WorldBvh};
 use super::components::GroundTruthMesh;
+use super::constants::AUTO_FIT_COVERAGE_RATIO;
 use super::resources::MeshGroundTruthConfig;
 use super::triangles::extract_triangles_from_mesh;
+use crate::world::WorldConfig;
 
 const APPLY_EPS: f32 = 1.0e-4;
 
@@ -106,6 +108,8 @@ pub fn build_bvh_when_scene_ready(
     mut commands: Commands,
     meshes: Option<Res<Assets<Mesh>>>,
     bvh_present: Option<Res<WorldBvh>>,
+    mut config: ResMut<MeshGroundTruthConfig>,
+    world_config: Option<Res<WorldConfig>>,
     root_query: Query<Entity, With<GroundTruthMesh>>,
     children_q: Query<&Children>,
     mesh_q: Query<(&Mesh3d, &GlobalTransform)>,
@@ -142,5 +146,43 @@ pub fn build_bvh_when_scene_ready(
     let count = triangles.len();
     let bvh = build_world_bvh(triangles);
     info!("built ground-truth BVH from {} triangles", count);
+
+    // One-shot auto-fit: requires WorldConfig + a matching
+    // applied_transform (so we only fit the first build, not the
+    // post-fit rebuild).
+    let applied_matches = config
+        .applied_transform
+        .is_some_and(|a| a == (config.translation, config.scale));
+    if config.auto_fit_on_first_build && applied_matches {
+        if let Some(world) = world_config.as_ref() {
+            let aabb_min = Vec3::new(
+                bvh.cwbvh.total_aabb.min.x,
+                bvh.cwbvh.total_aabb.min.y,
+                bvh.cwbvh.total_aabb.min.z,
+            );
+            let aabb_max = Vec3::new(
+                bvh.cwbvh.total_aabb.max.x,
+                bvh.cwbvh.total_aabb.max.y,
+                bvh.cwbvh.total_aabb.max.z,
+            );
+            let (new_t, new_s) = recommended_transform(
+                aabb_min,
+                aabb_max,
+                world.world_size(),
+                config.translation,
+                config.scale,
+                AUTO_FIT_COVERAGE_RATIO,
+            );
+            info!(
+                "auto-fit suggested: translation={:?} scale={:.3} (was {:?} scale={})",
+                new_t, new_s, config.translation, config.scale
+            );
+            config.translation = new_t;
+            config.scale = new_s;
+            config.apply_requested = true;
+            config.auto_fit_on_first_build = false;
+        }
+    }
+
     commands.insert_resource(bvh);
 }

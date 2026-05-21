@@ -13,7 +13,7 @@ use crate::lidar::gpu::{
     LocalInstanceVecBuffer, LocalOccupancyBuffer, RayDirsBuffer,
 };
 use crate::render::{GpuGlobalMapVoxel, GpuLocalMapVoxel, GroundTruthVoxel, LidarPointVoxel};
-use crate::world::{GroundTruthMap, WorldBvh, WorldConfig};
+use crate::world::{GroundTruthMap, MeshGroundTruthConfig, WorldBvh, WorldConfig};
 
 use super::asset::MapAsset;
 use super::events::MapSwapRequested;
@@ -84,6 +84,7 @@ pub fn apply_pending_swap(
     readbacks: Query<Entity, With<Readback>>,
     mut stats: ResMut<GpuGlobalStats>,
     mut mirror: ResMut<GpuGlobalOccupancyMirror>,
+    mut mesh_gt: ResMut<MeshGroundTruthConfig>,
 ) {
     let Some(handle) = pending.handle.clone() else {
         return;
@@ -140,6 +141,9 @@ pub fn apply_pending_swap(
 
     *stats = GpuGlobalStats::default();
     mirror.data.clear();
+
+    // Re-arm auto-fit so the next scene gets its own size + floor align.
+    mesh_gt.auto_fit_on_first_build = true;
 
     let map = GroundTruthMap::from_bitset(asset.dims, &asset.bitset);
     let occupied = map.count_occupied();

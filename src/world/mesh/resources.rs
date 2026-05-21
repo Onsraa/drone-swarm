@@ -20,6 +20,11 @@ pub struct MeshGroundTruthConfig {
     /// Last (translation, scale) that was actually spawned. Used by the
     /// invalidate system to detect divergence from the current values.
     pub applied_transform: Option<(Vec3, f32)>,
+    /// One-shot auto-fit: after the first BVH builds, read its AABB
+    /// and write a (translation, scale) that fits the mesh into the
+    /// voxel world horizontally + floor-aligns Y. Flipped to `false`
+    /// once applied. Side panel "Recompute auto-fit" re-arms it.
+    pub auto_fit_on_first_build: bool,
 }
 
 impl Default for MeshGroundTruthConfig {
@@ -32,6 +37,7 @@ impl Default for MeshGroundTruthConfig {
             scale: DEFAULT_SCENE_SCALE,
             apply_requested: false,
             applied_transform: None,
+            auto_fit_on_first_build: true,
         }
     }
 }

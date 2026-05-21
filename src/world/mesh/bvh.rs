@@ -45,6 +45,41 @@ pub fn cast_ray(bvh: &WorldBvh, origin: Vec3, direction: Vec3) -> Option<f32> {
     }
 }
 
+/// Compute a recommended `(translation, scale)` that horizontally
+/// fits the mesh AABB into `coverage` × world horizontal extent and
+/// floor-aligns `min.y` to world `y = 0`. `aabb_min/max` are in
+/// world meters at the *currently applied* transform; the helper
+/// inverts that transform so the result is the new full transform
+/// (not a delta).
+pub fn recommended_transform(
+    aabb_min: Vec3,
+    aabb_max: Vec3,
+    world_size: Vec3,
+    current_translation: Vec3,
+    current_scale: f32,
+    coverage: f32,
+) -> (Vec3, f32) {
+    let extent = aabb_max - aabb_min;
+    let horiz_extent = extent.x.max(extent.z).max(1.0e-6);
+    let world_horiz = world_size.x.max(world_size.z);
+    let target = world_horiz * coverage;
+    let scale_mult = target / horiz_extent;
+    let new_scale = current_scale * scale_mult;
+
+    let aabb_center = (aabb_min + aabb_max) * 0.5;
+    let local_center = aabb_center - current_translation;
+    let local_min = aabb_min - current_translation;
+    let world_center = world_size * 0.5;
+
+    let new_translation = Vec3::new(
+        world_center.x - local_center.x * scale_mult,
+        -local_min.y * scale_mult,
+        world_center.z - local_center.z * scale_mult,
+    );
+
+    (new_translation, new_scale)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,6 +108,86 @@ mod tests {
             "expected hit distance ~5.0, got {}",
             t
         );
+    }
+
+    fn assert_vec3_near(actual: Vec3, expected: Vec3, eps: f32) {
+        assert!(
+            (actual - expected).length() < eps,
+            "expected ~{:?}, got {:?}",
+            expected,
+            actual
+        );
+    }
+
+    const WORLD_640: Vec3 = Vec3::new(640.0, 24.0, 640.0);
+
+    #[test]
+    fn auto_fit_upscales_tiny_mesh() {
+        // 10m cube centred at origin, current transform = identity.
+        let (t, s) = recommended_transform(
+            Vec3::new(-5.0, -5.0, -5.0),
+            Vec3::new(5.0, 5.0, 5.0),
+            WORLD_640,
+            Vec3::ZERO,
+            1.0,
+            0.8,
+        );
+        // target = 640 * 0.8 = 512; horiz_extent = 10 -> scale = 51.2
+        assert!((s - 51.2).abs() < 0.01, "scale = {}", s);
+        // After scale, centre stays at origin, lowest y = -5*51.2 = -256
+        // -> translation = (320, 256, 320)
+        assert_vec3_near(t, Vec3::new(320.0, 256.0, 320.0), 0.1);
+    }
+
+    #[test]
+    fn auto_fit_downscales_huge_mesh() {
+        let (t, s) = recommended_transform(
+            Vec3::new(-500.0, -500.0, -500.0),
+            Vec3::new(500.0, 500.0, 500.0),
+            WORLD_640,
+            Vec3::ZERO,
+            1.0,
+            0.8,
+        );
+        // horiz_extent = 1000 -> scale = 512/1000 = 0.512
+        assert!((s - 0.512).abs() < 0.01, "scale = {}", s);
+        // translation = (320, 500*0.512=256, 320)
+        assert_vec3_near(t, Vec3::new(320.0, 256.0, 320.0), 0.1);
+    }
+
+    #[test]
+    fn auto_fit_centres_off_corner_mesh() {
+        // 10m cube at (45..55) in x/z, (-5..5) in y, transform identity.
+        let (t, s) = recommended_transform(
+            Vec3::new(45.0, -5.0, 45.0),
+            Vec3::new(55.0, 5.0, 55.0),
+            WORLD_640,
+            Vec3::ZERO,
+            1.0,
+            0.8,
+        );
+        // scale = 51.2. Local centre at (50, 0, 50). After scale_mult,
+        // local_center * 51.2 = (2560, 0, 2560). Translation =
+        // world_center - that = (320 - 2560, 5*51.2, 320 - 2560) =
+        // (-2240, 256, -2240).
+        assert!((s - 51.2).abs() < 0.01);
+        assert_vec3_near(t, Vec3::new(-2240.0, 256.0, -2240.0), 1.0);
+    }
+
+    #[test]
+    fn auto_fit_is_idempotent_after_first_fit() {
+        // After fitting, AABB world = (64, 0, 64)..(576, 512, 576),
+        // current_translation = (320, 256, 320), current_scale = 51.2.
+        let aabb_min = Vec3::new(64.0, 0.0, 64.0);
+        let aabb_max = Vec3::new(576.0, 512.0, 576.0);
+        let cur_t = Vec3::new(320.0, 256.0, 320.0);
+        let cur_s = 51.2;
+        let (t, s) = recommended_transform(
+            aabb_min, aabb_max, WORLD_640, cur_t, cur_s, 0.8,
+        );
+        // horiz_extent = 512 = target -> scale_mult = 1.0 -> new_scale = cur_s
+        assert!((s - cur_s).abs() < 0.01, "scale should be stable: {} vs {}", s, cur_s);
+        assert_vec3_near(t, cur_t, 0.5);
     }
 
     #[test]
