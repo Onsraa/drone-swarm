@@ -27,7 +27,7 @@ use crate::comms::CommsState;
 use crate::drone::{Drone, DroneColor, DroneId};
 use crate::exploration::{Role, RoleParams};
 use crate::lidar::sampling::RoleConeRange;
-use crate::lidar::{LidarFrameCounter, LidarSettings};
+use crate::lidar::{LidarFrameCounter, LidarSettings, LidarSourceMode};
 use crate::world::{WorldBvh, WorldConfig};
 
 use build_global_pass::{
@@ -38,7 +38,8 @@ use build_pass::{
     add_build_local_render_graph_node, init_build_local_pipeline, prepare_build_local_bind_group,
 };
 use dispatch::{
-    add_compute_render_graph_node, prepare_lidar_bind_group, prepare_lidar_bvh_bind_group,
+    add_compute_render_graph_node, add_compute_lidar_bvh_render_graph_node,
+    prepare_lidar_bind_group, prepare_lidar_bvh_bind_group,
 };
 use pipeline::{init_compute_lidar_bvh_pipeline, init_compute_lidar_pipeline};
 use prepare_indirect::{
@@ -99,6 +100,7 @@ impl Plugin for GpuLidarPlugin {
             .add_plugins(ExtractResourcePlugin::<DroneScanParamsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LidarSettings>::default())
             .add_plugins(ExtractResourcePlugin::<LidarFrameCounter>::default())
+            .add_plugins(ExtractResourcePlugin::<LidarSourceMode>::default())
             .add_plugins(ExtractResourcePlugin::<LocalActiveCellsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LocalActiveCountBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<GlobalActiveCellsBuffer>::default())
@@ -135,11 +137,12 @@ impl Plugin for GpuLidarPlugin {
                 RenderStartup,
                 (
                     init_compute_lidar_pipeline,
-                    // Phase 2b: BVH pipeline is built but not yet
-                    // queued into the render graph. Phase 2c registers
-                    // a ComputeLidarBvhNode that actually dispatches.
                     init_compute_lidar_bvh_pipeline,
                     add_compute_render_graph_node,
+                    // Phase 2c: BVH dispatch node. Both nodes gate on
+                    // LidarSourceMode + only one fires per frame.
+                    add_compute_lidar_bvh_render_graph_node
+                        .after(add_compute_render_graph_node),
                     init_build_local_pipeline,
                     init_build_global_pipeline,
                     init_prepare_build_indirect_pipeline,

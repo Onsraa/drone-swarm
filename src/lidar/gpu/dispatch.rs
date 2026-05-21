@@ -12,6 +12,7 @@ use bevy::render::storage::GpuShaderStorageBuffer;
 
 use super::per_drone_scan::DroneScanParamsBuffer;
 use super::pipeline::{ComputeLidarBvhPipeline, ComputeLidarPipeline};
+use super::prepare_indirect::PrepareBuildIndirectNodeLabel;
 use super::resources::{
     BvhNodesBuffer, BvhPrimitiveIndicesBuffer, BvhTriangleVerticesBuffer, DroneColorsBuffer,
     DroneOrientationsBuffer, DronePositionsBuffer, GlobalActiveCellsBuffer, GlobalActiveCountBuffer,
@@ -19,7 +20,7 @@ use super::resources::{
     LidarPointVecBuffer, LocalActiveCellsBuffer, LocalActiveCountBuffer, LocalOccupancyBuffer,
     RayDirsBuffer, MAX_DRONES_GPU,
 };
-use crate::lidar::{LidarFrameCounter, LidarSettings};
+use crate::lidar::{LidarFrameCounter, LidarSettings, LidarSourceMode};
 
 /// Bundles the active-list buffer handles + point-cloud buffers so
 /// `prepare_lidar_bind_group` stays within Bevy's 16-parameter system
@@ -160,6 +161,15 @@ impl render_graph::Node for ComputeLidarNode {
         render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), NodeRunError> {
+        // Phase 2c: gate on the source-mode toggle. BVH path is owned
+        // by ComputeLidarBvhNode; this DDA path only runs when Dda.
+        let mode = world
+            .get_resource::<LidarSourceMode>()
+            .copied()
+            .unwrap_or_default();
+        if mode != LidarSourceMode::Dda {
+            return Ok(());
+        }
         let pipeline_cache = world.resource::<PipelineCache>();
         let pipeline = world.resource::<ComputeLidarPipeline>();
         let Some(bind_group) = world.get_resource::<LidarBindGroup>() else {
@@ -213,6 +223,83 @@ impl render_graph::Node for ComputeLidarNode {
 
 pub fn add_compute_render_graph_node(mut render_graph: ResMut<RenderGraph>) {
     render_graph.add_node(ComputeLidarNodeLabel, ComputeLidarNode);
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
+pub struct ComputeLidarBvhNodeLabel;
+
+#[derive(Default)]
+pub struct ComputeLidarBvhNode;
+
+impl render_graph::Node for ComputeLidarBvhNode {
+    fn run(
+        &self,
+        _graph: &mut RenderGraphContext,
+        render_context: &mut RenderContext,
+        world: &World,
+    ) -> Result<(), NodeRunError> {
+        let mode = world
+            .get_resource::<LidarSourceMode>()
+            .copied()
+            .unwrap_or_default();
+        if mode != LidarSourceMode::Bvh {
+            return Ok(());
+        }
+        let pipeline_cache = world.resource::<PipelineCache>();
+        let Some(pipeline) = world.get_resource::<ComputeLidarBvhPipeline>() else {
+            return Ok(());
+        };
+        let Some(bind_group) = world.get_resource::<LidarBvhBindGroup>() else {
+            return Ok(());
+        };
+        let Some(compute_pipeline) = pipeline_cache.get_compute_pipeline(pipeline.pipeline) else {
+            return Ok(());
+        };
+        let settings = world
+            .get_resource::<LidarSettings>()
+            .copied()
+            .unwrap_or_default();
+        let frame = world
+            .get_resource::<LidarFrameCounter>()
+            .map(|c| c.0)
+            .unwrap_or(0);
+        let interval = settings.scan_interval_frames.max(1);
+        if frame % interval != 0 {
+            return Ok(());
+        }
+        let buffers = world.resource::<RenderAssets<GpuShaderStorageBuffer>>();
+        let Some(point_count_handle) = world.get_resource::<LidarPointCountBuffer>() else {
+            return Ok(());
+        };
+        let Some(point_count_buf) = buffers.get(&point_count_handle.0) else {
+            return Ok(());
+        };
+
+        let encoder = render_context.command_encoder();
+        if !settings.sticky_spray {
+            encoder.clear_buffer(&point_count_buf.buffer, 0, None);
+        }
+        let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+            label: Some("compute lidar bvh pass"),
+            ..default()
+        });
+        pass.set_bind_group(0, &bind_group.0, &[]);
+        pass.set_pipeline(compute_pipeline);
+        let group_x = MAX_DRONES_GPU.div_ceil(8);
+        let group_y = settings.rays_per_scan.max(1).div_ceil(8);
+        pass.dispatch_workgroups(group_x, group_y, 1);
+        Ok(())
+    }
+}
+
+pub fn add_compute_lidar_bvh_render_graph_node(mut render_graph: ResMut<RenderGraph>) {
+    render_graph.add_node(ComputeLidarBvhNodeLabel, ComputeLidarBvhNode);
+    // Run after the DDA node (no real dependency since only one fires
+    // per frame, but keeps render-graph order deterministic) and
+    // before PrepareBuildIndirect so the active-cell counts written
+    // by BVH are visible to it.
+    render_graph.add_node_edge(ComputeLidarNodeLabel, ComputeLidarBvhNodeLabel);
+    render_graph.add_node_edge(ComputeLidarBvhNodeLabel, PrepareBuildIndirectNodeLabel);
 }
 
 /// Build the BVH-shader bind group from the same 15 SSBOs the DDA

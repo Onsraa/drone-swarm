@@ -1,4 +1,5 @@
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
@@ -7,12 +8,20 @@ use crate::comms::{CommsSettings, CommsState, MAX_COMMS_RANGE_M, MIN_COMMS_RANGE
 use crate::drone::{Drone, DroneColor, DroneId, DroneSpawnConfig, MAX_DRONE_COUNT, MIN_DRONE_COUNT};
 use crate::exploration::Role;
 use crate::groups::DroneGroupPresets;
-use crate::lidar::{gpu::GpuGlobalStats, LidarSettings};
+use crate::lidar::{gpu::GpuGlobalStats, LidarSettings, LidarSourceMode};
 use crate::maps::{AvailableMaps, MapSwapRequested};
 use crate::world::{MeshGroundTruthConfig, WorldConfig};
 
 use super::constants::SIDE_PANEL_DEFAULT_WIDTH;
 use super::resources::UiState;
+
+/// Bundle of single-Res<...> toggles to keep `draw_ui` under Bevy's
+/// 16-parameter system limit.
+#[derive(SystemParam)]
+pub struct PanelToggles<'w> {
+    pub mesh_gt: ResMut<'w, MeshGroundTruthConfig>,
+    pub lidar_mode: ResMut<'w, LidarSourceMode>,
+}
 
 #[allow(clippy::too_many_arguments)]
 pub fn draw_ui(
@@ -30,7 +39,7 @@ pub fn draw_ui(
     drones_q: Query<(&DroneId, &DroneColor, &Role), With<Drone>>,
     gpu_stats: Res<GpuGlobalStats>,
     world: Res<WorldConfig>,
-    mut mesh_gt: ResMut<MeshGroundTruthConfig>,
+    mut toggles: PanelToggles,
     diagnostics: Res<DiagnosticsStore>,
 ) -> Result {
     let fps = diagnostics
@@ -51,7 +60,7 @@ pub fn draw_ui(
 
             ui.label("Layers");
             ui.checkbox(&mut state.show_ground_truth, "Show ground truth cubes (debug)");
-            ui.checkbox(&mut mesh_gt.visible, "Show ground truth mesh");
+            ui.checkbox(&mut toggles.mesh_gt.visible, "Show ground truth mesh");
             ui.checkbox(&mut state.show_local_maps, "Show drone local maps");
             ui.checkbox(&mut state.show_global_map, "Show central map");
             ui.checkbox(&mut state.show_lidar_points, "Show lidar spray (GPU points)");
@@ -75,6 +84,16 @@ pub fn draw_ui(
             ui.separator();
 
             draw_lidar_sliders(ui, &mut lidar_settings);
+            ui.horizontal(|ui| {
+                ui.label("Lidar source:");
+                let mut is_bvh = *toggles.lidar_mode == LidarSourceMode::Bvh;
+                if ui.radio_value(&mut is_bvh, false, "DDA (voxel)").clicked() {
+                    *toggles.lidar_mode = LidarSourceMode::Dda;
+                }
+                if ui.radio_value(&mut is_bvh, true, "BVH (mesh)").clicked() {
+                    *toggles.lidar_mode = LidarSourceMode::Bvh;
+                }
+            });
             ui.separator();
 
             draw_comms_controls(ui, &mut comms_settings, &comms_state);
