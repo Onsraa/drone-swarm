@@ -7,7 +7,7 @@ pub mod sampling;
 use bevy::prelude::*;
 
 pub use gpu::GpuLidarPlugin;
-pub use resources::{LidarFrameCounter, LidarSettings, LidarSourceMode};
+pub use resources::{LidarFrameCounter, LidarSettings};
 
 /// Owns the runtime-tunable `LidarSettings` + frame counter. Ray-set
 /// content lives in `sampling::build_role_ray_buffer`, called by
@@ -18,7 +18,6 @@ impl Plugin for LidarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LidarSettings>()
             .init_resource::<LidarFrameCounter>()
-            .init_resource::<LidarSourceMode>()
             .add_systems(Update, tick_frame_counter);
     }
 }

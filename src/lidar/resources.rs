@@ -53,18 +53,7 @@ impl LidarSettings {
 }
 
 /// Main-world frame counter incremented once per Update tick. Extracted
-/// into the render world so `ComputeLidarNode` can skip dispatches based
+/// into the render world so `ComputeLidarBvhNode` can skip dispatches based
 /// on `LidarSettings.scan_interval_frames`.
 #[derive(Resource, ExtractResource, Default, Clone, Copy, Debug)]
 pub struct LidarFrameCounter(pub u32);
-
-/// Which compute shader does the per-frame lidar dispatch. Phase 2c
-/// parity gate: `Dda` keeps the existing voxel-grid path running;
-/// `Bvh` switches to the new mesh-BVH traversal. Both pipelines are
-/// always built; only one dispatches per frame.
-#[derive(Resource, ExtractResource, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum LidarSourceMode {
-    #[default]
-    Dda,
-    Bvh,
-}

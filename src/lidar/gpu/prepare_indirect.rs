@@ -12,7 +12,6 @@ use bevy::render::render_resource::{
 use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::storage::GpuShaderStorageBuffer;
 
-use super::dispatch::ComputeLidarNodeLabel;
 use super::resources::{BuildIndirectBuffer, GlobalActiveCountBuffer, LocalActiveCountBuffer};
 
 const SHADER_ASSET_PATH: &str = "shaders/prepare_build_indirect.wgsl";
@@ -124,5 +123,8 @@ pub fn add_prepare_build_indirect_render_graph_node(mut render_graph: ResMut<Ren
     render_graph.add_node(PrepareBuildIndirectNodeLabel, PrepareBuildIndirectNode);
     // After lidar writes the active-cell counts, before build_local +
     // build_global read the indirect args.
-    render_graph.add_node_edge(ComputeLidarNodeLabel, PrepareBuildIndirectNodeLabel);
+    render_graph.add_node_edge(
+        super::dispatch::ComputeLidarBvhNodeLabel,
+        PrepareBuildIndirectNodeLabel,
+    );
 }

@@ -8,8 +8,7 @@ use crate::comms::{CommsSettings, CommsState, MAX_COMMS_RANGE_M, MIN_COMMS_RANGE
 use crate::drone::{Drone, DroneColor, DroneId, DroneSpawnConfig, MAX_DRONE_COUNT, MIN_DRONE_COUNT};
 use crate::exploration::Role;
 use crate::groups::DroneGroupPresets;
-use crate::lidar::{gpu::GpuGlobalStats, LidarSettings, LidarSourceMode};
-use crate::maps::{AvailableMaps, MapSwapRequested};
+use crate::lidar::{gpu::GpuGlobalStats, LidarSettings};
 use crate::world::{MeshGroundTruthConfig, WorldBvh, WorldConfig};
 
 use super::constants::SIDE_PANEL_DEFAULT_WIDTH;
@@ -20,7 +19,6 @@ use super::resources::{UiPointerCapture, UiState};
 #[derive(SystemParam)]
 pub struct PanelToggles<'w> {
     pub mesh_gt: ResMut<'w, MeshGroundTruthConfig>,
-    pub lidar_mode: ResMut<'w, LidarSourceMode>,
     pub pointer_capture: ResMut<'w, UiPointerCapture>,
     pub world_bvh: Option<Res<'w, WorldBvh>>,
 }
@@ -30,8 +28,6 @@ pub fn draw_ui(
     mut contexts: EguiContexts,
     mut state: ResMut<UiState>,
     mut spawn_config: ResMut<DroneSpawnConfig>,
-    mut available: ResMut<AvailableMaps>,
-    mut swap_writer: MessageWriter<MapSwapRequested>,
     mut lidar_settings: ResMut<LidarSettings>,
     mut comms_settings: ResMut<CommsSettings>,
     mut presets: ResMut<DroneGroupPresets>,
@@ -60,11 +56,7 @@ pub fn draw_ui(
                     ui.label(format!("FPS: {:.0}", fps));
                     ui.separator();
 
-                    draw_map_picker(ui, &mut available, &mut swap_writer);
-                    ui.separator();
-
                     ui.label("Layers");
-                    ui.checkbox(&mut state.show_ground_truth, "Show ground truth cubes (debug)");
                     ui.checkbox(&mut toggles.mesh_gt.visible, "Show ground truth mesh");
                     ui.checkbox(&mut state.show_local_maps, "Show drone local maps");
                     ui.checkbox(&mut state.show_global_map, "Show central map");
@@ -89,20 +81,6 @@ pub fn draw_ui(
                     ui.separator();
 
                     draw_lidar_sliders(ui, &mut lidar_settings);
-                    ui.horizontal(|ui| {
-                        ui.label("Lidar source:");
-                        ui.selectable_value(
-                            &mut *toggles.lidar_mode,
-                            LidarSourceMode::Dda,
-                            "DDA (voxel)",
-                        );
-                        ui.selectable_value(
-                            &mut *toggles.lidar_mode,
-                            LidarSourceMode::Bvh,
-                            "BVH (mesh)",
-                        );
-                    });
-                    ui.label(format!("active: {:?}", *toggles.lidar_mode));
                     ui.separator();
 
                     ui.label("Ground truth mesh");
@@ -204,42 +182,6 @@ pub fn draw_ui(
     toggles.pointer_capture.0 =
         ctx.is_pointer_over_area() || ctx.wants_pointer_input();
     Ok(())
-}
-
-fn draw_map_picker(
-    ui: &mut egui::Ui,
-    available: &mut AvailableMaps,
-    swap_writer: &mut MessageWriter<MapSwapRequested>,
-) {
-    ui.label("Map");
-    let selected_label = available
-        .selected
-        .and_then(|i| available.entries.get(i))
-        .map(|e| e.name.clone())
-        .unwrap_or_else(|| "<none>".to_string());
-
-    let mut chosen: Option<usize> = None;
-    egui::ComboBox::from_id_salt("map_picker")
-        .selected_text(selected_label)
-        .show_ui(ui, |ui| {
-            for (i, entry) in available.entries.iter().enumerate() {
-                let is_selected = available.selected == Some(i);
-                if ui.selectable_label(is_selected, &entry.name).clicked() {
-                    chosen = Some(i);
-                }
-            }
-        });
-
-    if let Some(i) = chosen {
-        if available.selected != Some(i) {
-            available.selected = Some(i);
-            let entry = &available.entries[i];
-            swap_writer.write(MapSwapRequested {
-                handle: entry.handle.clone(),
-                name: entry.name.clone(),
-            });
-        }
-    }
 }
 
 fn draw_group_presets(

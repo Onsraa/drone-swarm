@@ -1,8 +1,5 @@
 use bevy::prelude::*;
 
-#[derive(Component)]
-pub struct GroundTruthVoxel;
-
 /// Marker for the single render entity whose vertex buffer is the
 /// GPU-built local-map instance buffer.
 #[derive(Component)]

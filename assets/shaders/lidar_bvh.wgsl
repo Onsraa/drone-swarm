@@ -1,24 +1,13 @@
-// GPU lidar — BVH path. One thread per (drone, ray). Replaces
-// lidar_compute.wgsl's DDA traversal with a CWBVH8 stack-based walk
-// against the mesh ground truth.
+// GPU lidar — BVH path. One thread per (drone, ray). Casts a world-
+// space ray (drone position in voxel-grid coords -> world meters,
+// rotated by the drone's quaternion) into a CWBVH8 traversal against
+// the static mesh ground truth. On hit, atomicOr's a per-drone +
+// comms-gated global occupancy bit at the quantized cell, appends to
+// active-cell lists, emits a point into the spray buffer.
 //
-// Ray construction matches the DDA shader: drone_positions[] is in
-// voxel-grid space, ray_dirs[] is in the drone's local frame
-// (forward = -Z), drone_orientations[] is a unit quaternion. The ray
-// is converted to world meters before BVH traversal (the BVH was
-// built from world-space mesh vertices).
-//
-// On hit, the world-space hit point is converted back to a cell
-// index and atomicOr'd into the per-drone occupancy SSBO; if the
-// drone is comms-connected, the same bit is OR'd into the global
-// occupancy SSBO. A point is emitted into the spray buffer for
-// visualization. Free-cell marking along the ray is intentionally
-// omitted for Phase 2c — the BVH returns only the hit, not the
-// cells traversed; Phase 4 may revisit if coverage parity matters.
-//
-// CWBVH8 reference: Ylitie 2017 HPG paper "Efficient Incoherent Ray
-// Traversal on GPUs Through Compressed Wide BVHs"; algorithm ported
-// from obvhs::cwbvh (MIT/Apache 2.0).
+// Algorithm reference: Ylitie 2017 HPG "Efficient Incoherent Ray
+// Traversal on GPUs Through Compressed Wide BVHs"; ported from
+// obvhs::cwbvh (MIT/Apache 2.0).
 
 struct LidarParams {
     dims: vec4<u32>,
@@ -42,24 +31,23 @@ struct DroneScanParams {
     scan_interval: u32,
 };
 
-@group(0) @binding(0) var<storage, read> ground_bitset: array<u32>;
-@group(0) @binding(1) var<storage, read> params: LidarParams;
-@group(0) @binding(2) var<storage, read> drone_positions: array<vec4<f32>>;
-@group(0) @binding(3) var<storage, read> ray_dirs: array<vec4<f32>>;
-@group(0) @binding(4) var<storage, read> drone_orientations: array<vec4<f32>>;
-@group(0) @binding(5) var<storage, read_write> local_occupancy: array<atomic<u32>>;
-@group(0) @binding(6) var<storage, read> drone_colors: array<vec4<f32>>;
-@group(0) @binding(7) var<storage, read_write> point_count: atomic<u32>;
-@group(0) @binding(8) var<storage, read_write> point_buffer: array<vec4<f32>>;
-@group(0) @binding(9) var<storage, read> drone_scan: array<DroneScanParams>;
-@group(0) @binding(10) var<storage, read_write> global_occupancy: array<atomic<u32>>;
-@group(0) @binding(11) var<storage, read_write> local_active_cells: array<u32>;
-@group(0) @binding(12) var<storage, read_write> local_active_count: array<atomic<u32>>;
-@group(0) @binding(13) var<storage, read_write> global_active_cells: array<u32>;
-@group(0) @binding(14) var<storage, read_write> global_active_count: atomic<u32>;
-@group(0) @binding(15) var<storage, read> bvh_nodes: array<u32>;
-@group(0) @binding(16) var<storage, read> bvh_primitive_indices: array<u32>;
-@group(0) @binding(17) var<storage, read> bvh_triangle_vertices: array<vec4<f32>>;
+@group(0) @binding(0) var<storage, read> params: LidarParams;
+@group(0) @binding(1) var<storage, read> drone_positions: array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read> ray_dirs: array<vec4<f32>>;
+@group(0) @binding(3) var<storage, read> drone_orientations: array<vec4<f32>>;
+@group(0) @binding(4) var<storage, read_write> local_occupancy: array<atomic<u32>>;
+@group(0) @binding(5) var<storage, read> drone_colors: array<vec4<f32>>;
+@group(0) @binding(6) var<storage, read_write> point_count: atomic<u32>;
+@group(0) @binding(7) var<storage, read_write> point_buffer: array<vec4<f32>>;
+@group(0) @binding(8) var<storage, read> drone_scan: array<DroneScanParams>;
+@group(0) @binding(9) var<storage, read_write> global_occupancy: array<atomic<u32>>;
+@group(0) @binding(10) var<storage, read_write> local_active_cells: array<u32>;
+@group(0) @binding(11) var<storage, read_write> local_active_count: array<atomic<u32>>;
+@group(0) @binding(12) var<storage, read_write> global_active_cells: array<u32>;
+@group(0) @binding(13) var<storage, read_write> global_active_count: atomic<u32>;
+@group(0) @binding(14) var<storage, read> bvh_nodes: array<u32>;
+@group(0) @binding(15) var<storage, read> bvh_primitive_indices: array<u32>;
+@group(0) @binding(16) var<storage, read> bvh_triangle_vertices: array<vec4<f32>>;
 
 const MAX_LOCAL_ACTIVE_PER_DRONE: u32 = 200000u;
 const MAX_GLOBAL_ACTIVE: u32 = 500000u;
@@ -149,8 +137,6 @@ fn node_extent(e: vec3<u32>) -> vec3<f32> {
     );
 }
 
-// Per-child AABB hit test. Returns the hit_mask bit pattern for this node:
-// high 8 bits = inner child hits, low 24 bits = leaf primitive bits.
 fn intersect_node(
     node: CwNode,
     ro: vec3<f32>,
@@ -205,8 +191,6 @@ fn intersect_node(
     return hit_mask;
 }
 
-// Möller-Trumbore ray-triangle intersection. Returns t on hit (>= 0),
-// TMAX_MISS on miss. Matches obvhs::triangle::Triangle::intersect.
 fn triangle_intersect(
     v0: vec3<f32>,
     v1: vec3<f32>,
@@ -238,8 +222,6 @@ fn triangle_intersect(
     return TMAX_MISS;
 }
 
-// Stack-based CWBVH8 closest-hit traversal. Returns (t, primitive_id)
-// — primitive_id = 0xffffffff on miss (encoded via bitcast<f32>).
 struct TraversalResult {
     t: f32,
     primitive_id: u32,
@@ -261,7 +243,6 @@ fn traverse_ray(ro: vec3<f32>, rd: vec3<f32>, tmax_init: f32) -> TraversalResult
         loop_count = loop_count + 1u;
         if (loop_count > TRAVERSAL_LOOP_CAP) { break; }
 
-        // Drain primitive group.
         while (primitive_group.y != 0u) {
             let local_idx = u32(firstLeadingBit(primitive_group.y));
             primitive_group.y = primitive_group.y & ~(1u << local_idx);
@@ -388,12 +369,10 @@ fn lidar_bvh(@builtin(global_invocation_id) gid: vec3<u32>) {
     let ray_buf_idx = scan.ray_offset + ray_local_idx;
     let local_dir = ray_dirs[ray_buf_idx].xyz;
 
-    // drone_positions is voxel-grid space; BVH is world meters.
     let origin_grid = drone_positions[drone_idx].xyz;
     let origin_world = origin_grid * params.voxel_size;
     let world_dir = normalize(quat_rotate(drone_orientations[drone_idx], local_dir));
 
-    // Max ray length in world meters, matching DDA scan range.
     let max_t_world = f32(scan.max_steps) * params.voxel_size;
 
     let result = traverse_ray(origin_world, world_dir, max_t_world);
@@ -406,17 +385,4 @@ fn lidar_bvh(@builtin(global_invocation_id) gid: vec3<u32>) {
     let flat = cell_flat_idx(hit_cell);
     mark_cell_occupied(drone_idx, flat);
     emit_point(drone_idx, hit_world);
-}
-
-// Reference unused bindings so naga doesn't strip them.
-// `ground_bitset` is shared with the DDA layout but the BVH path
-// doesn't read it. Touching it once with a guarded no-op keeps the
-// layout in sync.
-fn _layout_anchor() {
-    if (params.drone_count == 0xFFFFFFFFu) {
-        let unused = ground_bitset[0];
-        if (unused != 0u) {
-            atomicStore(&point_count, unused);
-        }
-    }
 }

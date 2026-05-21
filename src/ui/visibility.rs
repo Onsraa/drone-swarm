@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::render::{GpuGlobalMapVoxel, GpuLocalMapVoxel, GroundTruthVoxel, LidarPointVoxel};
+use crate::render::{GpuGlobalMapVoxel, GpuLocalMapVoxel, LidarPointVoxel};
 
 use super::resources::UiState;
 
@@ -10,20 +10,10 @@ use super::resources::UiState;
 /// with default `Visibility::Visible`.
 pub fn apply_visibility(
     state: Res<UiState>,
-    mut ground_truth_q: Query<
-        &mut Visibility,
-        (
-            With<GroundTruthVoxel>,
-            Without<GpuLocalMapVoxel>,
-            Without<GpuGlobalMapVoxel>,
-            Without<LidarPointVoxel>,
-        ),
-    >,
     mut local_map_q: Query<
         &mut Visibility,
         (
             With<GpuLocalMapVoxel>,
-            Without<GroundTruthVoxel>,
             Without<GpuGlobalMapVoxel>,
             Without<LidarPointVoxel>,
         ),
@@ -32,7 +22,6 @@ pub fn apply_visibility(
         &mut Visibility,
         (
             With<GpuGlobalMapVoxel>,
-            Without<GroundTruthVoxel>,
             Without<GpuLocalMapVoxel>,
             Without<LidarPointVoxel>,
         ),
@@ -41,13 +30,11 @@ pub fn apply_visibility(
         &mut Visibility,
         (
             With<LidarPointVoxel>,
-            Without<GroundTruthVoxel>,
             Without<GpuLocalMapVoxel>,
             Without<GpuGlobalMapVoxel>,
         ),
     >,
 ) {
-    set_layer(&mut ground_truth_q, to_visibility(state.show_ground_truth));
     set_layer(&mut local_map_q, to_visibility(state.show_local_maps));
     set_layer(&mut global_map_q, to_visibility(state.show_global_map));
     set_layer(&mut lidar_points_q, to_visibility(state.show_lidar_points));

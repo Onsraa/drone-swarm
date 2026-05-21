@@ -3,7 +3,7 @@ use bevy::render::extract_resource::ExtractResource;
 use bevy::render::render_resource::{BufferUsages, ShaderType};
 use bevy::render::storage::ShaderStorageBuffer;
 
-use crate::world::GroundTruthMap;
+use crate::world::WorldConfig;
 
 use super::super::constants::RAYS_PER_SCAN;
 use super::super::sampling::{build_role_ray_buffer, RoleConeRange};
@@ -97,9 +97,6 @@ pub struct BuildLocalParams {
 }
 
 #[derive(Resource, ExtractResource, Clone)]
-pub struct GroundTruthBuffer(pub Handle<ShaderStorageBuffer>);
-
-#[derive(Resource, ExtractResource, Clone)]
 pub struct LidarParamsBuffer(pub Handle<ShaderStorageBuffer>);
 
 #[derive(Resource, ExtractResource, Clone)]
@@ -179,21 +176,17 @@ pub struct BvhPrimitiveIndicesBuffer(pub Handle<ShaderStorageBuffer>);
 #[derive(Resource, ExtractResource, Clone)]
 pub struct BvhTriangleVerticesBuffer(pub Handle<ShaderStorageBuffer>);
 
-/// One-shot startup: packs the CPU ground truth and allocates every
-/// lidar input/output buffer. Positions and params start zeroed; the
-/// per-frame `upload_drone_positions` system fills them with real data.
+/// One-shot startup: allocates every lidar input/output buffer.
+/// Positions and params start zeroed; the per-frame `upload_drone_*`
+/// systems fill them with real data once drones spawn.
 pub fn setup_gpu_lidar_assets(
     mut commands: Commands,
     mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
-    ground: Res<GroundTruthMap>,
+    world: Res<WorldConfig>,
 ) {
-    let bitset = ground.pack_bitset();
-    let mut ground_buf = ShaderStorageBuffer::from(bitset);
-    ground_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
-    let ground_handle = buffers.add(ground_buf);
-
+    let dims = world.size;
     let params = LidarParams {
-        dims: UVec4::new(ground.dims.x, ground.dims.y, ground.dims.z, 0),
+        dims: UVec4::new(dims.x, dims.y, dims.z, 0),
         max_steps: MAX_STEPS_PER_RAY,
         rays_per_scan: RAYS_PER_SCAN as u32,
         drone_count: 0,
@@ -236,7 +229,7 @@ pub fn setup_gpu_lidar_assets(
     dirs_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
     let dirs_handle = buffers.add(dirs_buf);
 
-    let words_per_drone = occupancy_words_per_drone(ground.dims);
+    let words_per_drone = occupancy_words_per_drone(dims);
     let occupancy_len = (MAX_DRONES_GPU as usize) * words_per_drone;
     let mut occupancy_buf = ShaderStorageBuffer::from(vec![0u32; occupancy_len]);
     occupancy_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
@@ -248,7 +241,7 @@ pub fn setup_gpu_lidar_assets(
     let global_occupancy_handle = buffers.add(global_occupancy_buf);
 
     let build_params = BuildLocalParams {
-        dims: UVec4::new(ground.dims.x, ground.dims.y, ground.dims.z, 0),
+        dims: UVec4::new(dims.x, dims.y, dims.z, 0),
         drone_count: 0,
         voxel_size: 1.0,
         scale_factor: 1.0,
@@ -356,7 +349,6 @@ pub fn setup_gpu_lidar_assets(
         words_per_drone,
     );
 
-    commands.insert_resource(GroundTruthBuffer(ground_handle));
     commands.insert_resource(LidarParamsBuffer(params_handle));
     commands.insert_resource(DronePositionsBuffer(positions_handle));
     commands.insert_resource(DroneOrientationsBuffer(orientations_handle));

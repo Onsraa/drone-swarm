@@ -11,7 +11,6 @@ mod exploration;
 mod groups;
 mod lidar;
 mod lighting;
-mod maps;
 mod pheromone;
 mod physics;
 mod render;
@@ -27,7 +26,6 @@ use exploration::ExplorationPlugin;
 use groups::DroneGroupPresetsPlugin;
 use lidar::{GpuLidarPlugin, LidarPlugin};
 use lighting::LightingPlugin;
-use maps::MapsPlugin;
 use pheromone::PheromonePlugin;
 use physics::PhysicsPlugin;
 use render::VoxelRenderPlugin;
@@ -48,7 +46,6 @@ fn main() {
         }))
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(EguiPlugin::default())
-        .add_plugins(MapsPlugin)
         .add_plugins(WorldPlugin)
         .add_plugins(MeshGroundTruthPlugin)
         .add_plugins(LightingPlugin)

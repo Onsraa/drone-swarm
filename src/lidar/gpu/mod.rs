@@ -11,10 +11,9 @@ pub use resources::{
     BuildIndirectBuffer, BuildLocalParamsBuffer, BvhNodesBuffer, BvhPrimitiveIndicesBuffer,
     BvhTriangleVerticesBuffer, DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer,
     GlobalActiveCellsBuffer, GlobalActiveCountBuffer, GlobalInstanceCountBuffer,
-    GlobalInstanceVecBuffer, GlobalOccupancyBuffer, GroundTruthBuffer, LidarParamsBuffer,
-    LidarPointCountBuffer, LidarPointVecBuffer, LocalActiveCellsBuffer, LocalActiveCountBuffer,
-    LocalInstanceCountBuffer, LocalInstanceVecBuffer, LocalOccupancyBuffer, RayDirsBuffer,
-    RoleConeRanges,
+    GlobalInstanceVecBuffer, GlobalOccupancyBuffer, LidarParamsBuffer, LidarPointCountBuffer,
+    LidarPointVecBuffer, LocalActiveCellsBuffer, LocalActiveCountBuffer, LocalInstanceCountBuffer,
+    LocalInstanceVecBuffer, RayDirsBuffer, RoleConeRanges,
 };
 
 use bevy::prelude::*;
@@ -27,7 +26,7 @@ use crate::comms::CommsState;
 use crate::drone::{Drone, DroneColor, DroneId};
 use crate::exploration::{Role, RoleParams};
 use crate::lidar::sampling::RoleConeRange;
-use crate::lidar::{LidarFrameCounter, LidarSettings, LidarSourceMode};
+use crate::lidar::{LidarFrameCounter, LidarSettings};
 use crate::world::{WorldBvh, WorldConfig};
 
 use build_global_pass::{
@@ -37,11 +36,8 @@ use build_global_pass::{
 use build_pass::{
     add_build_local_render_graph_node, init_build_local_pipeline, prepare_build_local_bind_group,
 };
-use dispatch::{
-    add_compute_render_graph_node, add_compute_lidar_bvh_render_graph_node,
-    prepare_lidar_bind_group, prepare_lidar_bvh_bind_group,
-};
-use pipeline::{init_compute_lidar_bvh_pipeline, init_compute_lidar_pipeline};
+use dispatch::{add_compute_lidar_bvh_render_graph_node, prepare_lidar_bvh_bind_group};
+use pipeline::init_compute_lidar_bvh_pipeline;
 use prepare_indirect::{
     add_prepare_build_indirect_render_graph_node, init_prepare_build_indirect_pipeline,
     prepare_build_indirect_bind_group,
@@ -82,7 +78,6 @@ impl Plugin for GpuLidarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GpuGlobalStats>()
             .init_resource::<GpuGlobalOccupancyMirror>()
-            .add_plugins(ExtractResourcePlugin::<GroundTruthBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LidarParamsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<DronePositionsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<DroneOrientationsBuffer>::default())
@@ -100,7 +95,6 @@ impl Plugin for GpuLidarPlugin {
             .add_plugins(ExtractResourcePlugin::<DroneScanParamsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LidarSettings>::default())
             .add_plugins(ExtractResourcePlugin::<LidarFrameCounter>::default())
-            .add_plugins(ExtractResourcePlugin::<LidarSourceMode>::default())
             .add_plugins(ExtractResourcePlugin::<LocalActiveCellsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<LocalActiveCountBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<GlobalActiveCellsBuffer>::default())
@@ -112,9 +106,7 @@ impl Plugin for GpuLidarPlugin {
             .add_systems(
                 Update,
                 (
-                    setup_gpu_lidar_assets
-                        .run_if(resource_exists::<crate::world::GroundTruthMap>)
-                        .run_if(not(resource_exists::<GroundTruthBuffer>)),
+                    setup_gpu_lidar_assets.run_if(not(resource_exists::<LidarParamsBuffer>)),
                     upload_drone_state.run_if(resource_exists::<DronePositionsBuffer>),
                     upload_build_params_and_colors
                         .run_if(resource_exists::<BuildLocalParamsBuffer>),
@@ -136,35 +128,23 @@ impl Plugin for GpuLidarPlugin {
             .add_systems(
                 RenderStartup,
                 (
-                    init_compute_lidar_pipeline,
                     init_compute_lidar_bvh_pipeline,
-                    add_compute_render_graph_node,
-                    // Phase 2c: BVH dispatch node. Both nodes gate on
-                    // LidarSourceMode + only one fires per frame.
-                    add_compute_lidar_bvh_render_graph_node
-                        .after(add_compute_render_graph_node),
+                    add_compute_lidar_bvh_render_graph_node,
                     init_build_local_pipeline,
                     init_build_global_pipeline,
                     init_prepare_build_indirect_pipeline,
-                    // Edges: lidar -> prepare_build_indirect ->
+                    // Edges: lidar_bvh -> prepare_build_indirect ->
                     // {build_local, build_global}. The prepare pass
                     // reads the per-drone + global active-cell counts
                     // and writes one shared indirect args buffer that
                     // both build passes dispatch from.
                     add_prepare_build_indirect_render_graph_node
-                        .after(add_compute_render_graph_node),
+                        .after(add_compute_lidar_bvh_render_graph_node),
                     add_build_local_render_graph_node
                         .after(add_prepare_build_indirect_render_graph_node),
                     add_build_global_render_graph_node
                         .after(add_prepare_build_indirect_render_graph_node),
                 ),
-            )
-            // `set_data` each frame re-prepares the storage buffers as
-            // brand-new GPU Buffer handles, so the bind group must
-            // rebuild every frame to point at the live ones.
-            .add_systems(
-                Render,
-                prepare_lidar_bind_group.in_set(RenderSystems::PrepareBindGroups),
             )
             .add_systems(
                 Render,

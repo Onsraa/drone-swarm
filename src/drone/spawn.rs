@@ -8,9 +8,7 @@ use crate::sensors::DetectorHits;
 use crate::world::{ground_altitude, WorldBvh, WorldConfig};
 
 use super::components::{Drone, DroneColor, DroneId};
-use super::constants::{
-    DRONE_SPAWN_RADIUS_METERS, SPAWN_GROUND_CLEARANCE_M, SPAWN_SKY_CAST_Y,
-};
+use super::constants::{DRONE_SPAWN_RADIUS_METERS, SPAWN_GROUND_CLEARANCE_M, SPAWN_SKY_CAST_Y};
 use super::resources::{DroneBodyAssets, DroneSpawnConfig};
 
 /// Each frame, if the drone count doesn't match `DroneSpawnConfig.target_count`,
@@ -52,7 +50,6 @@ pub fn respawn_drones_if_needed(
     mut commands: Commands,
     spawn_config: Res<DroneSpawnConfig>,
     world: Res<WorldConfig>,
-    map: Option<Res<crate::world::GroundTruthMap>>,
     bvh: Option<Res<WorldBvh>>,
     body_assets: Option<Res<DroneBodyAssets>>,
     drones_q: Query<Entity, With<Drone>>,
@@ -77,14 +74,7 @@ pub fn respawn_drones_if_needed(
     let world_center = world.center();
     let target = spawn_config.target_count;
     for id in 0..target {
-        let spawn_pos = ring_position(
-            world_center,
-            id,
-            target,
-            map.as_deref(),
-            bvh.as_deref(),
-            world.voxel_size,
-        );
+        let spawn_pos = ring_position(world_center, id, target, bvh.as_deref());
         let role = role_for_index(id, target);
         let tint = RoleParams::for_role(role).tint;
         let color = Color::linear_rgba(tint[0], tint[1], tint[2], tint[3]);
@@ -146,17 +136,10 @@ pub fn sync_color_to_role(
 /// Stagger N drones around the world center on a horizontal ring of
 /// `DRONE_SPAWN_RADIUS_METERS`. With N = 1 the drone lands at center.
 ///
-/// Altitude priority: BVH sky-cast hit + clearance (when `WorldBvh` is
-/// present), then voxel `GroundTruthMap::safe_spawn_cell_y`, then
-/// world centre. A small per-id Y jitter prevents perfect Y stacking.
-fn ring_position(
-    center: Vec3,
-    id: u32,
-    count: u32,
-    map: Option<&crate::world::GroundTruthMap>,
-    bvh: Option<&WorldBvh>,
-    voxel_size: f32,
-) -> Vec3 {
+/// Altitude: BVH sky-cast hit + clearance (when `WorldBvh` is built),
+/// otherwise world centre. A small per-id Y jitter prevents perfect Y
+/// stacking.
+fn ring_position(center: Vec3, id: u32, count: u32, bvh: Option<&WorldBvh>) -> Vec3 {
     let (x, z) = if count <= 1 {
         (center.x, center.z)
     } else {
@@ -167,20 +150,11 @@ fn ring_position(
         )
     };
 
-    let bvh_y = bvh
+    let y = bvh
         .and_then(|b| ground_altitude(b, x, z, SPAWN_SKY_CAST_Y))
-        .map(|gy| gy + SPAWN_GROUND_CLEARANCE_M);
-    let voxel_y = || {
-        let cell_x = (x / voxel_size).floor() as i32;
-        let cell_z = (z / voxel_size).floor() as i32;
-        map.and_then(|m| m.safe_spawn_cell_y(cell_x, cell_z, 4))
-            .map(|cy| (cy as f32 + 0.5) * voxel_size + 3.0)
-    };
-    let y = bvh_y.or_else(voxel_y).unwrap_or(center.y);
+        .map(|gy| gy + SPAWN_GROUND_CLEARANCE_M)
+        .unwrap_or(center.y);
 
-    // 0–1.5 m altitude jitter per id so consecutive drones don't
-    // stack on identical Y at spawn (and immediately fight the
-    // peer-bubble).
     let jitter = (id as f32 % 4.0) * 0.5;
     Vec3::new(x, y + jitter, z)
 }
