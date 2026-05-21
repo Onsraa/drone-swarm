@@ -8,12 +8,13 @@ mod resources;
 
 pub use per_drone_scan::{DroneScanParams, DroneScanParamsBuffer};
 pub use resources::{
-    BuildIndirectBuffer, BuildLocalParamsBuffer, DroneColorsBuffer, DroneOrientationsBuffer,
-    DronePositionsBuffer, GlobalActiveCellsBuffer, GlobalActiveCountBuffer,
-    GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, GlobalOccupancyBuffer, GroundTruthBuffer,
-    LidarParamsBuffer, LidarPointCountBuffer, LidarPointVecBuffer, LocalActiveCellsBuffer,
-    LocalActiveCountBuffer, LocalInstanceCountBuffer, LocalInstanceVecBuffer, LocalOccupancyBuffer,
-    RayDirsBuffer, RoleConeRanges,
+    BuildIndirectBuffer, BuildLocalParamsBuffer, BvhNodesBuffer, BvhPrimitiveIndicesBuffer,
+    BvhTriangleVerticesBuffer, DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer,
+    GlobalActiveCellsBuffer, GlobalActiveCountBuffer, GlobalInstanceCountBuffer,
+    GlobalInstanceVecBuffer, GlobalOccupancyBuffer, GroundTruthBuffer, LidarParamsBuffer,
+    LidarPointCountBuffer, LidarPointVecBuffer, LocalActiveCellsBuffer, LocalActiveCountBuffer,
+    LocalInstanceCountBuffer, LocalInstanceVecBuffer, LocalOccupancyBuffer, RayDirsBuffer,
+    RoleConeRanges,
 };
 
 use bevy::prelude::*;
@@ -27,7 +28,7 @@ use crate::drone::{Drone, DroneColor, DroneId};
 use crate::exploration::{Role, RoleParams};
 use crate::lidar::sampling::RoleConeRange;
 use crate::lidar::{LidarFrameCounter, LidarSettings};
-use crate::world::WorldConfig;
+use crate::world::{WorldBvh, WorldConfig};
 
 use build_global_pass::{
     add_build_global_render_graph_node, init_build_global_pipeline,
@@ -36,8 +37,10 @@ use build_global_pass::{
 use build_pass::{
     add_build_local_render_graph_node, init_build_local_pipeline, prepare_build_local_bind_group,
 };
-use dispatch::{add_compute_render_graph_node, prepare_lidar_bind_group};
-use pipeline::init_compute_lidar_pipeline;
+use dispatch::{
+    add_compute_render_graph_node, prepare_lidar_bind_group, prepare_lidar_bvh_bind_group,
+};
+use pipeline::{init_compute_lidar_bvh_pipeline, init_compute_lidar_pipeline};
 use prepare_indirect::{
     add_prepare_build_indirect_render_graph_node, init_prepare_build_indirect_pipeline,
     prepare_build_indirect_bind_group,
@@ -101,6 +104,9 @@ impl Plugin for GpuLidarPlugin {
             .add_plugins(ExtractResourcePlugin::<GlobalActiveCellsBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<GlobalActiveCountBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<BuildIndirectBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<BvhNodesBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<BvhPrimitiveIndicesBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<BvhTriangleVerticesBuffer>::default())
             .add_systems(
                 Update,
                 (
@@ -115,6 +121,9 @@ impl Plugin for GpuLidarPlugin {
                         .run_if(resource_exists::<DroneScanParamsBuffer>),
                     spawn_global_stats_readback
                         .run_if(resource_exists::<GlobalOccupancyBuffer>),
+                    upload_bvh_buffers
+                        .run_if(resource_exists::<WorldBvh>)
+                        .run_if(resource_exists::<BvhNodesBuffer>),
                 ),
             );
 
@@ -126,6 +135,10 @@ impl Plugin for GpuLidarPlugin {
                 RenderStartup,
                 (
                     init_compute_lidar_pipeline,
+                    // Phase 2b: BVH pipeline is built but not yet
+                    // queued into the render graph. Phase 2c registers
+                    // a ComputeLidarBvhNode that actually dispatches.
+                    init_compute_lidar_bvh_pipeline,
                     add_compute_render_graph_node,
                     init_build_local_pipeline,
                     init_build_global_pipeline,
@@ -161,8 +174,59 @@ impl Plugin for GpuLidarPlugin {
             .add_systems(
                 Render,
                 prepare_build_indirect_bind_group.in_set(RenderSystems::PrepareBindGroups),
+            )
+            .add_systems(
+                Render,
+                prepare_lidar_bvh_bind_group.in_set(RenderSystems::PrepareBindGroups),
             );
     }
+}
+
+/// Pack `WorldBvh` into the three GPU SSBOs. Runs in main-world Update
+/// whenever the BVH is added or rebuilt. `set_data` reallocates the
+/// underlying GPU buffer; the bind group rebuilds every frame so the
+/// new handle is picked up automatically.
+fn upload_bvh_buffers(
+    mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
+    nodes_handle: Res<BvhNodesBuffer>,
+    prim_idx_handle: Res<BvhPrimitiveIndicesBuffer>,
+    verts_handle: Res<BvhTriangleVerticesBuffer>,
+    world_bvh: Res<WorldBvh>,
+) {
+    if !world_bvh.is_added() && !world_bvh.is_changed() {
+        return;
+    }
+
+    // CwBvhNode is repr(C) + Pod + 80 bytes = 20 × u32. Direct cast.
+    let nodes_u32: Vec<u32> = bytemuck::cast_slice::<_, u32>(&world_bvh.cwbvh.nodes).to_vec();
+    let node_count = world_bvh.cwbvh.nodes.len();
+
+    let prim_indices: Vec<u32> = world_bvh.cwbvh.primitive_indices.clone();
+    let prim_count = prim_indices.len();
+
+    // Unindexed triangles: 3 × Vec4 per tri (xyz + pad).
+    let mut verts: Vec<Vec4> = Vec::with_capacity(world_bvh.triangles.len() * 3);
+    for tri in &world_bvh.triangles {
+        verts.push(Vec4::new(tri.v0.x, tri.v0.y, tri.v0.z, 0.0));
+        verts.push(Vec4::new(tri.v1.x, tri.v1.y, tri.v1.z, 0.0));
+        verts.push(Vec4::new(tri.v2.x, tri.v2.y, tri.v2.z, 0.0));
+    }
+    let vert_count = verts.len();
+
+    if let Some(buf) = buffers.get_mut(&nodes_handle.0) {
+        buf.set_data(nodes_u32);
+    }
+    if let Some(buf) = buffers.get_mut(&prim_idx_handle.0) {
+        buf.set_data(prim_indices);
+    }
+    if let Some(buf) = buffers.get_mut(&verts_handle.0) {
+        buf.set_data(verts);
+    }
+
+    info!(
+        "uploaded BVH to GPU: nodes={}, prim_indices={}, vertices={}",
+        node_count, prim_count, vert_count
+    );
 }
 
 #[allow(clippy::too_many_arguments)]

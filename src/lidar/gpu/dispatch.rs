@@ -11,12 +11,13 @@ use bevy::render::renderer::{RenderContext, RenderDevice};
 use bevy::render::storage::GpuShaderStorageBuffer;
 
 use super::per_drone_scan::DroneScanParamsBuffer;
-use super::pipeline::ComputeLidarPipeline;
+use super::pipeline::{ComputeLidarBvhPipeline, ComputeLidarPipeline};
 use super::resources::{
-    DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer, GlobalActiveCellsBuffer,
-    GlobalActiveCountBuffer, GlobalOccupancyBuffer, GroundTruthBuffer, LidarParamsBuffer,
-    LidarPointCountBuffer, LidarPointVecBuffer, LocalActiveCellsBuffer, LocalActiveCountBuffer,
-    LocalOccupancyBuffer, RayDirsBuffer, MAX_DRONES_GPU,
+    BvhNodesBuffer, BvhPrimitiveIndicesBuffer, BvhTriangleVerticesBuffer, DroneColorsBuffer,
+    DroneOrientationsBuffer, DronePositionsBuffer, GlobalActiveCellsBuffer, GlobalActiveCountBuffer,
+    GlobalOccupancyBuffer, GroundTruthBuffer, LidarParamsBuffer, LidarPointCountBuffer,
+    LidarPointVecBuffer, LocalActiveCellsBuffer, LocalActiveCountBuffer, LocalOccupancyBuffer,
+    RayDirsBuffer, MAX_DRONES_GPU,
 };
 use crate::lidar::{LidarFrameCounter, LidarSettings};
 
@@ -38,6 +39,23 @@ pub(crate) struct LidarExtraBuffers<'w> {
 
 #[derive(Resource)]
 pub struct LidarBindGroup(pub BindGroup);
+
+/// BVH SSBO handles bundled to keep `prepare_lidar_bvh_bind_group`
+/// inside Bevy's 16-parameter system limit.
+#[derive(SystemParam)]
+pub(crate) struct BvhBuffers<'w> {
+    pub nodes: Option<Res<'w, BvhNodesBuffer>>,
+    pub primitive_indices: Option<Res<'w, BvhPrimitiveIndicesBuffer>>,
+    pub triangle_vertices: Option<Res<'w, BvhTriangleVerticesBuffer>>,
+}
+
+/// Render-world resource holding the BVH-path bind group. Built each
+/// frame from the same buffer handles as the DDA path plus the three
+/// BVH SSBOs. Phase 2b doesn't dispatch this — the bind group + group
+/// layout existing is enough to flush out pipeline compilation issues.
+#[derive(Resource)]
+#[allow(dead_code)]
+pub struct LidarBvhBindGroup(pub BindGroup);
 
 pub fn prepare_lidar_bind_group(
     mut commands: Commands,
@@ -195,4 +213,113 @@ impl render_graph::Node for ComputeLidarNode {
 
 pub fn add_compute_render_graph_node(mut render_graph: ResMut<RenderGraph>) {
     render_graph.add_node(ComputeLidarNodeLabel, ComputeLidarNode);
+}
+
+/// Build the BVH-shader bind group from the same 15 SSBOs the DDA
+/// path uses plus the three BVH SSBOs (nodes, prim_indices, verts).
+/// Mirror of `prepare_lidar_bind_group` against `ComputeLidarBvhPipeline`.
+#[allow(clippy::too_many_arguments)]
+pub fn prepare_lidar_bvh_bind_group(
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+    pipeline: Option<Res<ComputeLidarBvhPipeline>>,
+    pipeline_cache: Res<PipelineCache>,
+    ground: Option<Res<GroundTruthBuffer>>,
+    params: Option<Res<LidarParamsBuffer>>,
+    positions: Option<Res<DronePositionsBuffer>>,
+    orientations: Option<Res<DroneOrientationsBuffer>>,
+    dirs: Option<Res<RayDirsBuffer>>,
+    occupancy: Option<Res<LocalOccupancyBuffer>>,
+    colors: Option<Res<DroneColorsBuffer>>,
+    extras: LidarExtraBuffers,
+    bvh: BvhBuffers,
+    buffers: Res<RenderAssets<GpuShaderStorageBuffer>>,
+) {
+    let (
+        Some(pipeline),
+        Some(ground),
+        Some(params),
+        Some(positions),
+        Some(orientations),
+        Some(dirs),
+        Some(occupancy),
+        Some(colors),
+        Some(point_count),
+        Some(point_vec),
+        Some(scan_params),
+        Some(global_occupancy),
+        Some(local_active_cells),
+        Some(local_active_count),
+        Some(global_active_cells),
+        Some(global_active_count),
+        Some(bvh_nodes),
+        Some(bvh_prim_idx),
+        Some(bvh_verts),
+    ) = (
+        pipeline,
+        ground,
+        params,
+        positions,
+        orientations,
+        dirs,
+        occupancy,
+        colors,
+        extras.point_count,
+        extras.point_vec,
+        extras.scan_params,
+        extras.global_occupancy,
+        extras.local_active_cells,
+        extras.local_active_count,
+        extras.global_active_cells,
+        extras.global_active_count,
+        bvh.nodes,
+        bvh.primitive_indices,
+        bvh.triangle_vertices,
+    ) else {
+        return;
+    };
+    let Some(ground_buf) = buffers.get(&ground.0) else { return; };
+    let Some(params_buf) = buffers.get(&params.0) else { return; };
+    let Some(positions_buf) = buffers.get(&positions.0) else { return; };
+    let Some(orientations_buf) = buffers.get(&orientations.0) else { return; };
+    let Some(dirs_buf) = buffers.get(&dirs.0) else { return; };
+    let Some(occupancy_buf) = buffers.get(&occupancy.0) else { return; };
+    let Some(colors_buf) = buffers.get(&colors.0) else { return; };
+    let Some(point_count_buf) = buffers.get(&point_count.0) else { return; };
+    let Some(point_vec_buf) = buffers.get(&point_vec.0) else { return; };
+    let Some(scan_params_buf) = buffers.get(&scan_params.0) else { return; };
+    let Some(global_occupancy_buf) = buffers.get(&global_occupancy.0) else { return; };
+    let Some(local_active_cells_buf) = buffers.get(&local_active_cells.0) else { return; };
+    let Some(local_active_count_buf) = buffers.get(&local_active_count.0) else { return; };
+    let Some(global_active_cells_buf) = buffers.get(&global_active_cells.0) else { return; };
+    let Some(global_active_count_buf) = buffers.get(&global_active_count.0) else { return; };
+    let Some(bvh_nodes_buf) = buffers.get(&bvh_nodes.0) else { return; };
+    let Some(bvh_prim_idx_buf) = buffers.get(&bvh_prim_idx.0) else { return; };
+    let Some(bvh_verts_buf) = buffers.get(&bvh_verts.0) else { return; };
+
+    let bind_group = render_device.create_bind_group(
+        "compute lidar bvh bind group",
+        &pipeline_cache.get_bind_group_layout(&pipeline.layout),
+        &BindGroupEntries::sequential((
+            ground_buf.buffer.as_entire_buffer_binding(),
+            params_buf.buffer.as_entire_buffer_binding(),
+            positions_buf.buffer.as_entire_buffer_binding(),
+            dirs_buf.buffer.as_entire_buffer_binding(),
+            orientations_buf.buffer.as_entire_buffer_binding(),
+            occupancy_buf.buffer.as_entire_buffer_binding(),
+            colors_buf.buffer.as_entire_buffer_binding(),
+            point_count_buf.buffer.as_entire_buffer_binding(),
+            point_vec_buf.buffer.as_entire_buffer_binding(),
+            scan_params_buf.buffer.as_entire_buffer_binding(),
+            global_occupancy_buf.buffer.as_entire_buffer_binding(),
+            local_active_cells_buf.buffer.as_entire_buffer_binding(),
+            local_active_count_buf.buffer.as_entire_buffer_binding(),
+            global_active_cells_buf.buffer.as_entire_buffer_binding(),
+            global_active_count_buf.buffer.as_entire_buffer_binding(),
+            bvh_nodes_buf.buffer.as_entire_buffer_binding(),
+            bvh_prim_idx_buf.buffer.as_entire_buffer_binding(),
+            bvh_verts_buf.buffer.as_entire_buffer_binding(),
+        )),
+    );
+    commands.insert_resource(LidarBvhBindGroup(bind_group));
 }

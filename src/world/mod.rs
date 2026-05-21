@@ -7,7 +7,7 @@ use bevy::prelude::*;
 
 pub use config::WorldConfig;
 pub use ground_truth::GroundTruthMap;
-pub use mesh::{MeshGroundTruthConfig, MeshGroundTruthPlugin};
+pub use mesh::{MeshGroundTruthConfig, MeshGroundTruthPlugin, WorldBvh};
 
 /// Inserts an initial `WorldConfig` placeholder so other plugins can
 /// safely depend on the resource existing at app build time. The real

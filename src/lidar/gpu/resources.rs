@@ -163,6 +163,22 @@ pub struct GlobalActiveCountBuffer(pub Handle<ShaderStorageBuffer>);
 #[derive(Resource, ExtractResource, Clone)]
 pub struct BuildIndirectBuffer(pub Handle<ShaderStorageBuffer>);
 
+/// CWBVH8 node table. 20 × u32 per node (80 bytes), bytemuck-cast
+/// directly from `obvhs::cwbvh::node::CwBvhNode`. Allocated empty at
+/// startup; `upload_bvh_buffers` fills it when `WorldBvh` is built.
+#[derive(Resource, ExtractResource, Clone)]
+pub struct BvhNodesBuffer(pub Handle<ShaderStorageBuffer>);
+
+/// Primitive index table from `CwBvh.primitive_indices`. `array<u32>`.
+/// Leaf nodes reference primitives through this indirection.
+#[derive(Resource, ExtractResource, Clone)]
+pub struct BvhPrimitiveIndicesBuffer(pub Handle<ShaderStorageBuffer>);
+
+/// Triangle vertex positions, unindexed: 3 × `vec4<f32>` per triangle.
+/// `xyz` is the world-space vertex, `w` is padding for 16-byte align.
+#[derive(Resource, ExtractResource, Clone)]
+pub struct BvhTriangleVerticesBuffer(pub Handle<ShaderStorageBuffer>);
+
 /// One-shot startup: packs the CPU ground truth and allocates every
 /// lidar input/output buffer. Positions and params start zeroed; the
 /// per-frame `upload_drone_positions` system fills them with real data.
@@ -315,6 +331,22 @@ pub fn setup_gpu_lidar_assets(
         BufferUsages::COPY_SRC | BufferUsages::COPY_DST | BufferUsages::INDIRECT;
     let build_indirect_handle = buffers.add(build_indirect_buf);
 
+    // BVH SSBOs — allocated empty (1-word fallback) so the bind group
+    // can build before the scene mesh is loaded + BVH built. The
+    // `upload_bvh_buffers` system replaces the contents via set_data
+    // once `WorldBvh` is inserted.
+    let mut bvh_nodes_buf = ShaderStorageBuffer::from(vec![0u32; 1]);
+    bvh_nodes_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let bvh_nodes_handle = buffers.add(bvh_nodes_buf);
+
+    let mut bvh_prim_idx_buf = ShaderStorageBuffer::from(vec![0u32; 1]);
+    bvh_prim_idx_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let bvh_prim_idx_handle = buffers.add(bvh_prim_idx_buf);
+
+    let mut bvh_verts_buf = ShaderStorageBuffer::from(vec![Vec4::ZERO]);
+    bvh_verts_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let bvh_verts_handle = buffers.add(bvh_verts_buf);
+
     info!(
         "GPU lidar buffers allocated: {} drone slots, {} rays/scan, {} steps/ray, {} occupancy u32s ({} words/drone)",
         MAX_DRONES_GPU,
@@ -345,5 +377,8 @@ pub fn setup_gpu_lidar_assets(
     commands.insert_resource(GlobalActiveCellsBuffer(global_active_handle));
     commands.insert_resource(GlobalActiveCountBuffer(global_active_count_handle));
     commands.insert_resource(BuildIndirectBuffer(build_indirect_handle));
+    commands.insert_resource(BvhNodesBuffer(bvh_nodes_handle));
+    commands.insert_resource(BvhPrimitiveIndicesBuffer(bvh_prim_idx_handle));
+    commands.insert_resource(BvhTriangleVerticesBuffer(bvh_verts_handle));
     commands.insert_resource(RoleConeRanges(role_ranges));
 }

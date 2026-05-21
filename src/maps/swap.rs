@@ -4,15 +4,16 @@ use bevy::render::gpu_readback::Readback;
 
 use crate::drone::Drone;
 use crate::lidar::gpu::{
-    BuildIndirectBuffer, BuildLocalParamsBuffer, DroneColorsBuffer, DroneOrientationsBuffer,
-    DronePositionsBuffer, GlobalActiveCellsBuffer, GlobalActiveCountBuffer,
-    GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, GlobalOccupancyBuffer,
-    GpuGlobalOccupancyMirror, GpuGlobalStats, GroundTruthBuffer, LidarParamsBuffer,
-    LidarPointCountBuffer, LidarPointVecBuffer, LocalActiveCellsBuffer, LocalActiveCountBuffer,
-    LocalInstanceCountBuffer, LocalInstanceVecBuffer, LocalOccupancyBuffer, RayDirsBuffer,
+    BuildIndirectBuffer, BuildLocalParamsBuffer, BvhNodesBuffer, BvhPrimitiveIndicesBuffer,
+    BvhTriangleVerticesBuffer, DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer,
+    GlobalActiveCellsBuffer, GlobalActiveCountBuffer, GlobalInstanceCountBuffer,
+    GlobalInstanceVecBuffer, GlobalOccupancyBuffer, GpuGlobalOccupancyMirror, GpuGlobalStats,
+    GroundTruthBuffer, LidarParamsBuffer, LidarPointCountBuffer, LidarPointVecBuffer,
+    LocalActiveCellsBuffer, LocalActiveCountBuffer, LocalInstanceCountBuffer,
+    LocalInstanceVecBuffer, LocalOccupancyBuffer, RayDirsBuffer,
 };
 use crate::render::{GpuGlobalMapVoxel, GpuLocalMapVoxel, GroundTruthVoxel, LidarPointVoxel};
-use crate::world::{GroundTruthMap, WorldConfig};
+use crate::world::{GroundTruthMap, WorldBvh, WorldConfig};
 
 use super::asset::MapAsset;
 use super::events::MapSwapRequested;
@@ -132,6 +133,10 @@ pub fn apply_pending_swap(
     commands.remove_resource::<GlobalActiveCellsBuffer>();
     commands.remove_resource::<GlobalActiveCountBuffer>();
     commands.remove_resource::<BuildIndirectBuffer>();
+    commands.remove_resource::<BvhNodesBuffer>();
+    commands.remove_resource::<BvhPrimitiveIndicesBuffer>();
+    commands.remove_resource::<BvhTriangleVerticesBuffer>();
+    commands.remove_resource::<WorldBvh>();
 
     *stats = GpuGlobalStats::default();
     mirror.data.clear();
