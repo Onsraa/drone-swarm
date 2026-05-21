@@ -18,6 +18,7 @@ use super::constants::{
     MAPPER_FRONTIER_WEIGHT, MAPPER_GRADIENT_ALPHA, MAPPER_GRADIENT_BETA, PEER_BUBBLE_RADIUS_M,
     SCOUT_EMA_ALPHA, SCOUT_FRONTIER_WEIGHT, TRAIL_MAX_POINTS, TRAIL_SAMPLE_INTERVAL_SECS,
 };
+use super::anchor_planner::AnchorAssignments;
 use super::frontier::FrontierAssignments;
 use super::role::{peer_repulsion_for, Role, RoleParams};
 use super::steering::{reactive_force, reactive_force_peers};
@@ -81,7 +82,8 @@ pub fn draw_trail_gizmos(
 pub fn apply_role_steering(
     time: Res<Time>,
     pheromone: Res<PheromoneField>,
-    assignments: Res<FrontierAssignments>,
+    frontier_assignments: Res<FrontierAssignments>,
+    anchor_assignments: Res<AnchorAssignments>,
     world: Res<crate::world::WorldConfig>,
     comms_state: Res<CommsState>,
     comms_settings: Res<crate::comms::CommsSettings>,
@@ -140,7 +142,7 @@ pub fn apply_role_steering(
         }
         let terrain = reactive_force(pos, &hits_buf, &[], avoid_k);
 
-        let frontier_dir = assignments
+        let frontier_dir = frontier_assignments
             .targets
             .get(&id.0)
             .map(|target| (*target - pos).normalize_or_zero())
@@ -232,7 +234,14 @@ pub fn apply_role_steering(
                 let half = (id.0 >= 32) as usize;
                 let in_chain = (comms_state.connected_mask[half] >> (id.0 % 32)) & 1 == 1;
 
-                let target = if !comms_settings.enabled || ghost.peers.is_empty() {
+                let target = if let Some(planner_target) =
+                    anchor_assignments.targets.get(&id.0)
+                {
+                    // Active planner has identified a stretched edge
+                    // this anchor should move to relay. Overrides the
+                    // passive critical-radius spring below.
+                    *planner_target
+                } else if !comms_settings.enabled || ghost.peers.is_empty() {
                     central_pos
                 } else if !in_chain {
                     central_pos
