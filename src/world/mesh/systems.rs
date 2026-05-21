@@ -6,10 +6,18 @@ use super::components::GroundTruthMesh;
 use super::resources::MeshGroundTruthConfig;
 use super::triangles::extract_triangles_from_mesh;
 
+const APPLY_EPS: f32 = 1.0e-4;
+
+fn transform_changed(current: (Vec3, f32), applied: (Vec3, f32)) -> bool {
+    (current.0 - applied.0).length_squared() > APPLY_EPS
+        || (current.1 - applied.1).abs() > APPLY_EPS
+}
+
 /// One-shot spawn of the ground-truth mesh entity. The scene asset is
 /// loaded by path from `MeshGroundTruthConfig`; if the file is absent
 /// the asset server logs a warning and the SceneRoot stays empty until
-/// the file appears (asset hot reload).
+/// the file appears (asset hot reload). Translation + scale come from
+/// the config so the scene lands centred on the voxel world.
 pub fn spawn_mesh_ground_truth(
     mut commands: Commands,
     asset_server: Option<Res<AssetServer>>,
@@ -23,14 +31,53 @@ pub fn spawn_mesh_ground_truth(
         return;
     };
     let handle: Handle<Scene> = asset_server.load(config.scene_asset_path.clone());
+    let transform = Transform::from_translation(config.translation)
+        .with_scale(Vec3::splat(config.scale));
     commands.spawn((
         GroundTruthMesh,
         SceneRoot(handle),
-        Transform::IDENTITY,
+        transform,
         Visibility::default(),
     ));
     config.spawned = true;
-    info!("spawned ground-truth mesh from {}", config.scene_asset_path);
+    config.applied_transform = Some((config.translation, config.scale));
+    info!(
+        "spawned ground-truth mesh from {} at {:?} scale {}",
+        config.scene_asset_path, config.translation, config.scale
+    );
+}
+
+/// Tear down the current SceneRoot + clear `WorldBvh` so the next
+/// frame respawns + rebuilds with the new transform. Fires when the
+/// UI Apply button sets `apply_requested = true` AND the requested
+/// transform differs from what was last applied.
+pub fn invalidate_mesh_on_apply(
+    mut commands: Commands,
+    mut config: ResMut<MeshGroundTruthConfig>,
+    existing: Query<Entity, With<GroundTruthMesh>>,
+) {
+    if !config.apply_requested {
+        return;
+    }
+    let current = (config.translation, config.scale);
+    let needs_rebuild = match config.applied_transform {
+        Some(applied) => transform_changed(current, applied),
+        None => true,
+    };
+    config.apply_requested = false;
+    if !needs_rebuild {
+        return;
+    }
+    for e in &existing {
+        commands.entity(e).despawn();
+    }
+    commands.remove_resource::<WorldBvh>();
+    config.spawned = false;
+    config.applied_transform = None;
+    info!(
+        "mesh ground truth invalidated — respawn at {:?} scale {}",
+        config.translation, config.scale
+    );
 }
 
 pub fn apply_mesh_visibility(

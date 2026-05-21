@@ -17,10 +17,14 @@ impl Plugin for MeshGroundTruthPlugin {
         app.init_resource::<MeshGroundTruthConfig>().add_systems(
             Update,
             (
+                // Ordering matters: invalidate first so a same-frame
+                // Apply tears the scene down before spawn re-fires.
+                systems::invalidate_mesh_on_apply,
                 systems::spawn_mesh_ground_truth,
                 systems::apply_mesh_visibility,
                 systems::build_bvh_when_scene_ready,
-            ),
+            )
+                .chain(),
         );
     }
 }

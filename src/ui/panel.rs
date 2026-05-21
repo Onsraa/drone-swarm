@@ -90,14 +90,49 @@ pub fn draw_ui(
                     draw_lidar_sliders(ui, &mut lidar_settings);
                     ui.horizontal(|ui| {
                         ui.label("Lidar source:");
-                        let mut is_bvh = *toggles.lidar_mode == LidarSourceMode::Bvh;
-                        if ui.radio_value(&mut is_bvh, false, "DDA (voxel)").clicked() {
-                            *toggles.lidar_mode = LidarSourceMode::Dda;
-                        }
-                        if ui.radio_value(&mut is_bvh, true, "BVH (mesh)").clicked() {
-                            *toggles.lidar_mode = LidarSourceMode::Bvh;
-                        }
+                        ui.selectable_value(
+                            &mut *toggles.lidar_mode,
+                            LidarSourceMode::Dda,
+                            "DDA (voxel)",
+                        );
+                        ui.selectable_value(
+                            &mut *toggles.lidar_mode,
+                            LidarSourceMode::Bvh,
+                            "BVH (mesh)",
+                        );
                     });
+                    ui.label(format!("active: {:?}", *toggles.lidar_mode));
+                    ui.separator();
+
+                    ui.label("Ground truth mesh");
+                    ui.add(
+                        egui::Slider::new(
+                            &mut toggles.mesh_gt.translation.x,
+                            0.0..=640.0,
+                        )
+                        .text("pos X"),
+                    );
+                    ui.add(
+                        egui::Slider::new(
+                            &mut toggles.mesh_gt.translation.y,
+                            -20.0..=40.0,
+                        )
+                        .text("pos Y"),
+                    );
+                    ui.add(
+                        egui::Slider::new(
+                            &mut toggles.mesh_gt.translation.z,
+                            0.0..=640.0,
+                        )
+                        .text("pos Z"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut toggles.mesh_gt.scale, 0.1..=20.0)
+                            .text("scale"),
+                    );
+                    if ui.button("Apply (respawn + rebuild BVH)").clicked() {
+                        toggles.mesh_gt.apply_requested = true;
+                    }
                     ui.separator();
 
                     draw_comms_controls(ui, &mut comms_settings, &comms_state);
