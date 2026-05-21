@@ -5,7 +5,8 @@ use crate::drone::{Drone, DroneId};
 use crate::world::{ground_altitude, WorldBvh, WorldConfig};
 
 use super::constants::BASE_DEFAULT_HEIGHT_M;
-use super::resources::{CommsSettings, CommsState};
+use super::resources::{CommsSettings, CommsState, PARENT_BASE, PARENT_NONE};
+use crate::drone::MAX_DRONE_COUNT;
 
 const COMMS_SKY_CAST_Y: f32 = 2000.0;
 const COMMS_BASE_CLEARANCE_M: f32 = 1.0;
@@ -33,10 +34,19 @@ pub fn compute_connectivity(
     let base_pos = Vec3::new(center.x, base_y, center.z);
     state.base_pos = base_pos;
     state.total_count = drones.iter().count();
+    state.bfs_parent = [PARENT_NONE; MAX_DRONE_COUNT as usize];
 
     if !settings.enabled {
         state.connected_mask = [u32::MAX, u32::MAX];
         state.connected_count = state.total_count;
+        // With comms disabled every drone is treated as connected
+        // directly to the base; record that so downstream consumers
+        // see a flat tree instead of a stale parent map.
+        for (id, _) in &drones {
+            if (id.0 as u32) < MAX_DRONE_COUNT {
+                state.bfs_parent[id.0 as usize] = PARENT_BASE;
+            }
+        }
         return;
     }
 
@@ -49,23 +59,31 @@ pub fn compute_connectivity(
 
     let n = entries.len();
     let mut connected = vec![false; n];
+    // Parent in the BFS tree, indexed by entries[]. -3 = no parent yet
+    // (workspace sentinel; rewritten as PARENT_NONE for disconnected
+    // drones in the final pass below). PARENT_BASE for the seeded
+    // frontier, otherwise the drone id of whoever discovered this one.
+    let mut entry_parent: Vec<i16> = vec![-3; n];
     let mut frontier: Vec<usize> = Vec::new();
 
     for (i, (_, pos)) in entries.iter().enumerate() {
         if pos.distance_squared(base_pos) <= r2 {
             connected[i] = true;
+            entry_parent[i] = PARENT_BASE;
             frontier.push(i);
         }
     }
 
     while let Some(i) = frontier.pop() {
         let pi = entries[i].1;
+        let parent_id = entries[i].0 as i16;
         for j in 0..n {
             if connected[j] {
                 continue;
             }
             if pi.distance_squared(entries[j].1) <= r2 {
                 connected[j] = true;
+                entry_parent[j] = parent_id;
                 frontier.push(j);
             }
         }
@@ -74,6 +92,13 @@ pub fn compute_connectivity(
     let mut mask = [0u32; 2];
     let mut count = 0usize;
     for (i, (id, _)) in entries.iter().enumerate() {
+        if (*id as u32) < MAX_DRONE_COUNT {
+            state.bfs_parent[*id as usize] = if connected[i] {
+                entry_parent[i]
+            } else {
+                PARENT_NONE
+            };
+        }
         if !connected[i] {
             continue;
         }

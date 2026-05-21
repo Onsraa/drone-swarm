@@ -5,7 +5,7 @@ mod systems;
 use bevy::prelude::*;
 
 pub use constants::{MAX_COMMS_RANGE_M, MIN_COMMS_RANGE_M};
-pub use resources::{CommsSettings, CommsState};
+pub use resources::{CommsSettings, CommsState, PARENT_BASE, PARENT_NONE};
 
 use systems::{compute_connectivity, draw_comms_gizmos};
 
