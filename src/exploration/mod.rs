@@ -8,7 +8,7 @@ pub mod systems;
 
 use bevy::prelude::*;
 
-pub use components::{GhostMemory, Trail};
+pub use components::{GhostMemory, ScoutGradientEma, Trail};
 pub use role::{Role, RoleParams};
 pub use supervisor::{LastRoleChange, SupervisorTimer};
 

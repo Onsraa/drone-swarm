@@ -1,26 +1,28 @@
 /// Pheromone-field downsample relative to native voxel grid.
 /// At voxel_size = 1 m and DOWNSAMPLE = 8, each pheromone cell covers
 /// an 8 m × 8 m × 8 m block. For a 640×24×640 world that's an 80×3×80
-/// scalar grid ≈ 19 K cells × 4 bytes = 76 KB. Cheap to decay + deposit
-/// every frame on CPU.
+/// scalar grid ≈ 19 K cells per channel × 4 bytes = 76 KB per channel.
 pub const DOWNSAMPLE: u32 = 8;
 
 /// Continuous decay rate in 1/s. The per-frame factor used by
-/// `decay_pheromone` is `exp(-DECAY_RATE * dt)`. At dt = 1/120 s the
-/// factor is ≈ 0.999, half-life ≈ 6 s. Slow enough that trails persist
-/// long enough for a slow Mapper to follow them; fast enough that the
-/// colony "forgets" stale paths within ~20 s.
+/// `decay_pheromone` is `exp(-DECAY_RATE * dt)`. Half-life ≈ 6 s.
 pub const DECAY_RATE: f32 = 0.115;
 
-/// Pheromone deposited per frame in the drone's current cell. Higher
-/// on Scouts so they leave strong trails. Mappers don't deposit —
-/// they're consumers, not producers. Anchors don't move so depositing
-/// would just pile up at their hover position.
+/// Per-frame Laplacian diffusion rate. `new = (1-rate)*here + rate*mean6`
+/// applied each frame. At 60 Hz this softens edges over ~0.5 s without
+/// erasing the trail.
+pub const DIFFUSION_RATE: f32 = 0.015;
+
+/// Pheromone deposited per frame into the drone's current cell, per
+/// channel. Scouts mark "I came through here" so other scouts repel and
+/// mappers follow. Mappers mark "I've detail-mapped this region" so
+/// peer mappers can avoid duplication. Anchors hover, depositing would
+/// pile up at one cell.
 pub const DEPOSIT_SCOUT_PER_FRAME: f32 = 5.0;
-pub const DEPOSIT_MAPPER_PER_FRAME: f32 = 0.0;
+pub const DEPOSIT_MAPPER_PER_FRAME: f32 = 3.0;
 pub const DEPOSIT_ANCHOR_PER_FRAME: f32 = 0.0;
 
 /// Fraction of the drone's deposit that bleeds into each of the six
-/// face-neighbour cells. Softens the trail edge so Mappers don't lose
-/// the gradient on cell-boundary crossings.
+/// face-neighbour cells. Combined with per-frame diffusion this gives
+/// smooth gradients without one-frame deposit spikes.
 pub const DEPOSIT_NEIGHBOR_FRACTION: f32 = 0.25;

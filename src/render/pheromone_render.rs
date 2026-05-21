@@ -67,7 +67,8 @@ fn rebuild_pheromone_instances(
         return;
     };
     let cell_size = field.cell_size();
-    if cell_size <= 0.0 || field.cells.is_empty() {
+    let total = (field.dims.x * field.dims.y * field.dims.z) as usize;
+    if cell_size <= 0.0 || total == 0 {
         if !layer.data.is_empty() {
             layer.data.clear();
             layer.generation = layer.generation.wrapping_add(1);
@@ -79,7 +80,8 @@ fn rebuild_pheromone_instances(
     let plane = dx * dy;
     layer.data.clear();
 
-    for (i, &v) in field.cells.iter().enumerate() {
+    for i in 0..total {
+        let v = field.value_sum_at_index(i);
         if v < VIZ_THRESHOLD {
             continue;
         }

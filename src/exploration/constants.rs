@@ -19,3 +19,16 @@ pub const TRAIL_MAX_POINTS: usize = 120;
 /// gizmo draw budget on points that are 1 mm apart at low FPS; the
 /// 0.2 s gate keeps the line smooth without flooding.
 pub const TRAIL_SAMPLE_INTERVAL_SECS: f32 = 0.2;
+
+/// Mapper steering reads a weighted two-channel gradient:
+/// `α · ∇scout − β · ∇mapper`. α pulls mappers up Scout trails
+/// (pro-Scout). β pushes them away from regions other mappers have
+/// already detailed (anti-Mapper, prevents duplication).
+pub const MAPPER_GRADIENT_ALPHA: f32 = 1.0;
+pub const MAPPER_GRADIENT_BETA: f32 = 0.6;
+
+/// Scout heading is a first-order low-pass over the fresh anti-gradient
+/// direction. Each frame `dir = lerp(stored, fresh, SCOUT_EMA_ALPHA)`.
+/// α = 0.25 → ~4-frame time constant, kills self-deposit oscillation
+/// without making the scout slow to react to real gradient shifts.
+pub const SCOUT_EMA_ALPHA: f32 = 0.25;

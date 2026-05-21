@@ -2,7 +2,9 @@ use std::f32::consts::TAU;
 
 use bevy::prelude::*;
 
-use crate::exploration::{GhostMemory, LastRoleChange, Role, RoleParams, Trail};
+use crate::exploration::{
+    GhostMemory, LastRoleChange, Role, RoleParams, ScoutGradientEma, Trail,
+};
 use crate::physics::{DesiredVelocity, LinearVelocity, PrevLinvel};
 use crate::sensors::DetectorHits;
 use crate::world::{ground_altitude, WorldBvh, WorldConfig};
@@ -103,7 +105,7 @@ fn spawn_one_drone(
         DesiredVelocity::default(),
         PrevLinvel::default(),
         Trail::default(),
-        GhostMemory::default(),
+        (GhostMemory::default(), ScoutGradientEma::default()),
         DetectorHits::default(),
         LastRoleChange::default(),
         Transform::from_translation(spawn_pos),

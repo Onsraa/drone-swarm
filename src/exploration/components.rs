@@ -27,3 +27,13 @@ pub struct GhostPeer {
 pub struct GhostMemory {
     pub peers: bevy::platform::collections::HashMap<u32, GhostPeer>,
 }
+
+/// EMA of the Scout's chosen unit direction. Each frame the fresh
+/// anti-gradient direction is blended into `dir` so single-frame
+/// oscillations from the scout's self-deposit feedback loop don't
+/// flip its heading. Only Scouts read or write it; other roles ignore
+/// it. Carried by every drone for query simplicity.
+#[derive(Component, Default, Debug)]
+pub struct ScoutGradientEma {
+    pub dir: Vec3,
+}

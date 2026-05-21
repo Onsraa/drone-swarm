@@ -9,12 +9,15 @@ use bevy::prelude::*;
 
 use crate::comms::CommsState;
 use crate::drone::{Drone, DroneColor, DroneId};
-use crate::pheromone::PheromoneField;
+use crate::pheromone::{Channel, PheromoneField};
 use crate::physics::DesiredVelocity;
 use crate::sensors::DetectorHits;
 
-use super::components::{GhostMemory, GhostPeer, Trail};
-use super::constants::{PEER_BUBBLE_RADIUS_M, TRAIL_MAX_POINTS, TRAIL_SAMPLE_INTERVAL_SECS};
+use super::components::{GhostMemory, GhostPeer, ScoutGradientEma, Trail};
+use super::constants::{
+    MAPPER_GRADIENT_ALPHA, MAPPER_GRADIENT_BETA, PEER_BUBBLE_RADIUS_M, SCOUT_EMA_ALPHA,
+    TRAIL_MAX_POINTS, TRAIL_SAMPLE_INTERVAL_SECS,
+};
 use super::role::{peer_repulsion_for, Role, RoleParams};
 use super::steering::{reactive_force, reactive_force_peers};
 
@@ -87,6 +90,7 @@ pub fn apply_role_steering(
             &Role,
             &mut DesiredVelocity,
             &mut GhostMemory,
+            &mut ScoutGradientEma,
             &DetectorHits,
         ),
         With<Drone>,
@@ -103,7 +107,7 @@ pub fn apply_role_steering(
     let central_pos = comms_state.base_pos;
     let world_center = world.center();
 
-    for (id, transform, role, mut desired, mut ghost, detector) in &mut q_self {
+    for (id, transform, role, mut desired, mut ghost, mut scout_ema, detector) in &mut q_self {
         let pos = transform.translation;
         let cruise = RoleParams::for_role(*role).cruise_speed_mps;
         let avoid_k = RoleParams::for_role(*role).avoid_k;
@@ -136,27 +140,49 @@ pub fn apply_role_steering(
 
         let role_force = match role {
             Role::Scout => {
-                let grad = pheromone.gradient_at(pos);
-                let anti = -grad;
-                let dir = anti.normalize_or_zero();
+                // Anti-gradient of the combined (Scout+Mapper) field —
+                // any drone's recent footprint repels.
+                let anti = -pheromone.gradient_at_sum(pos);
+                let fresh = anti.normalize_or_zero();
+                // EMA over previous direction kills self-deposit
+                // oscillation. When fresh is zero the EMA keeps the
+                // drone moving in its last committed direction.
+                let blended = scout_ema.dir.lerp(fresh, SCOUT_EMA_ALPHA);
+                let dir = blended.normalize_or_zero();
                 if dir == Vec3::ZERO {
                     let outward = (pos - world_center).normalize_or_zero();
-                    if outward == Vec3::ZERO {
-                        Vec3::new(1.0, 0.0, 0.0) * cruise
+                    let fallback = if outward == Vec3::ZERO {
+                        Vec3::new(1.0, 0.0, 0.0)
                     } else {
-                        outward * cruise
-                    }
+                        outward
+                    };
+                    scout_ema.dir = fallback;
+                    fallback * cruise
                 } else {
+                    scout_ema.dir = dir;
                     dir * cruise
                 }
             }
             Role::Mapper => {
-                let grad = pheromone.gradient_at(pos);
-                let dir = grad.normalize_or_zero();
-                if dir == Vec3::ZERO {
-                    Vec3::ZERO
-                } else {
+                // Two-channel gradient: follow Scout trails (+α·∇scout)
+                // while repelling from regions other Mappers have
+                // already detailed (-β·∇mapper).
+                let g_scout = pheromone.gradient_at_channel(pos, Channel::Scout);
+                let g_mapper = pheromone.gradient_at_channel(pos, Channel::Mapper);
+                let combined = g_scout * MAPPER_GRADIENT_ALPHA - g_mapper * MAPPER_GRADIENT_BETA;
+                let dir = combined.normalize_or_zero();
+                if dir != Vec3::ZERO {
                     dir * cruise
+                } else {
+                    // Stall fix: when no useful gradient, drift outward
+                    // from world center. Frontier-attraction (Phase B)
+                    // will replace this with a real goal.
+                    let outward = (pos - world_center).normalize_or_zero();
+                    if outward == Vec3::ZERO {
+                        Vec3::ZERO
+                    } else {
+                        outward * cruise
+                    }
                 }
             }
             Role::Anchor => {

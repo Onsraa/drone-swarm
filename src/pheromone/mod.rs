@@ -3,21 +3,23 @@ mod field;
 
 use bevy::prelude::*;
 
-pub use field::PheromoneField;
+pub use field::{Channel, PheromoneField};
 
 use crate::drone::Drone;
 use crate::exploration::Role;
 
 use constants::{
     DECAY_RATE, DEPOSIT_ANCHOR_PER_FRAME, DEPOSIT_MAPPER_PER_FRAME, DEPOSIT_NEIGHBOR_FRACTION,
-    DEPOSIT_SCOUT_PER_FRAME,
+    DEPOSIT_SCOUT_PER_FRAME, DIFFUSION_RATE,
 };
-use field::ensure_pheromone_sized;
+use field::{ensure_pheromone_sized, CHANNEL_COUNT};
 
-/// Pheromone-field plugin. Maintains a CPU scalar grid the swarm uses
-/// as a shared memory: drones deposit each frame, the field decays
-/// continuously, and `apply_role_steering` reads the local gradient to
-/// steer scouts away from explored zones + mappers toward them.
+/// Pheromone-field plugin. Maintains a two-channel CPU scalar grid
+/// (Scout / Mapper) the swarm uses as shared memory: drones deposit
+/// each frame on their role's channel, the field decays + diffuses
+/// continuously, and `apply_role_steering` reads channel gradients to
+/// steer scouts (anti-sum), mappers (pro-scout − anti-mapper), and to
+/// drive heatmap visualisation (sum).
 pub struct PheromonePlugin;
 
 impl Plugin for PheromonePlugin {
@@ -27,6 +29,7 @@ impl Plugin for PheromonePlugin {
             (
                 ensure_pheromone_sized,
                 decay_pheromone,
+                diffuse_pheromone,
                 deposit_pheromone,
             )
                 .chain(),
@@ -34,38 +37,50 @@ impl Plugin for PheromonePlugin {
     }
 }
 
-/// Per-second exponential decay of the entire field. Half-life is set
-/// by `DECAY_RATE` in constants.rs.
+/// Per-second exponential decay of every channel. Half-life is set by
+/// `DECAY_RATE` in constants.rs.
 fn decay_pheromone(time: Res<Time>, mut field: ResMut<PheromoneField>) {
     let dt = time.delta_secs();
-    if dt <= 0.0 || field.cells.is_empty() {
+    if dt <= 0.0 {
         return;
     }
     let factor = (-DECAY_RATE * dt).exp();
-    for v in field.cells.iter_mut() {
-        *v *= factor;
+    for ch in 0..CHANNEL_COUNT {
+        for v in field.channels[ch].iter_mut() {
+            *v *= factor;
+        }
     }
 }
 
-/// Each drone drops a pheromone deposit at its current position.
-/// Per-role amount: scouts deposit heavily (they're the trail-blazers),
-/// mappers + anchors don't deposit.
+/// Per-frame Laplacian diffusion step on every channel. Smooths sharp
+/// deposit boundaries so mappers don't lose the gradient on thin
+/// trails. `scratch` is a Local so the read-buffer is reused frame to
+/// frame.
+fn diffuse_pheromone(mut field: ResMut<PheromoneField>, mut scratch: Local<Vec<f32>>) {
+    field.diffuse(DIFFUSION_RATE, &mut scratch);
+}
+
+/// Each drone drops a deposit at its current position into its role's
+/// channel. Scouts → Scout channel. Mappers → Mapper channel. Anchors
+/// hover so a deposit would just pile up; their amount is 0.
 fn deposit_pheromone(
     mut field: ResMut<PheromoneField>,
     q: Query<(&Transform, &Role), With<Drone>>,
 ) {
-    if field.cells.is_empty() {
-        return;
-    }
     for (transform, role) in &q {
-        let amount = match role {
-            Role::Scout => DEPOSIT_SCOUT_PER_FRAME,
-            Role::Mapper => DEPOSIT_MAPPER_PER_FRAME,
-            Role::Anchor => DEPOSIT_ANCHOR_PER_FRAME,
+        let (channel, amount) = match role {
+            Role::Scout => (Channel::Scout, DEPOSIT_SCOUT_PER_FRAME),
+            Role::Mapper => (Channel::Mapper, DEPOSIT_MAPPER_PER_FRAME),
+            Role::Anchor => (Channel::Scout, DEPOSIT_ANCHOR_PER_FRAME),
         };
         if amount <= 0.0 {
             continue;
         }
-        field.deposit_at(transform.translation, amount, DEPOSIT_NEIGHBOR_FRACTION);
+        field.deposit_at_channel(
+            transform.translation,
+            channel,
+            amount,
+            DEPOSIT_NEIGHBOR_FRACTION,
+        );
     }
 }
