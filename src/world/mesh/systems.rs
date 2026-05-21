@@ -1,12 +1,24 @@
 use bevy::prelude::*;
 use bevy::scene::SceneRoot;
 
-use super::bvh::{build_world_bvh, recommended_transform, WorldBvh};
+use std::collections::HashMap;
+
+use super::bvh::{build_world_bvh_with_materials, recommended_transform, WorldBvh};
 use super::components::GroundTruthMesh;
 use super::constants::{AUTO_FIT_COVERAGE_RATIO, AUTO_FIT_TRIM_HIGH, AUTO_FIT_TRIM_LOW};
 use super::resources::MeshGroundTruthConfig;
 use super::triangles::{extract_triangles_from_mesh, percentile_trimmed_aabb};
 use crate::world::WorldConfig;
+
+fn material_albedo(handle: &Handle<StandardMaterial>, materials: &Assets<StandardMaterial>) -> Vec4 {
+    materials
+        .get(handle)
+        .map(|m| {
+            let lin = m.base_color.to_linear();
+            Vec4::new(lin.red, lin.green, lin.blue, lin.alpha)
+        })
+        .unwrap_or(Vec4::ONE)
+}
 
 const APPLY_EPS: f32 = 1.0e-4;
 
@@ -107,12 +119,17 @@ pub fn apply_mesh_visibility(
 pub fn build_bvh_when_scene_ready(
     mut commands: Commands,
     meshes: Option<Res<Assets<Mesh>>>,
+    materials: Option<Res<Assets<StandardMaterial>>>,
     bvh_present: Option<Res<WorldBvh>>,
     mut config: ResMut<MeshGroundTruthConfig>,
     world_config: Option<Res<WorldConfig>>,
     root_query: Query<Entity, With<GroundTruthMesh>>,
     children_q: Query<&Children>,
-    mesh_q: Query<(&Mesh3d, &GlobalTransform)>,
+    mesh_q: Query<(
+        &Mesh3d,
+        &GlobalTransform,
+        Option<&MeshMaterial3d<StandardMaterial>>,
+    )>,
 ) {
     if bvh_present.is_some() {
         return;
@@ -123,13 +140,40 @@ pub fn build_bvh_when_scene_ready(
     let Ok(root) = root_query.single() else {
         return;
     };
+    let materials_opt = materials.as_deref();
 
-    let mut triangles = Vec::new();
+    let mut triangles: Vec<obvhs::triangle::Triangle> = Vec::new();
+    let mut tri_materials: Vec<u32> = Vec::new();
+    let mut palette: Vec<Vec4> = Vec::new();
+    let mut palette_lookup: HashMap<AssetId<StandardMaterial>, u32> = HashMap::new();
+
     let mut stack = vec![root];
     while let Some(entity) = stack.pop() {
-        if let Ok((mesh3d, gx)) = mesh_q.get(entity) {
+        if let Ok((mesh3d, gx, mat)) = mesh_q.get(entity) {
             if let Some(mesh) = meshes.get(&mesh3d.0) {
-                triangles.extend(extract_triangles_from_mesh(mesh, gx.to_matrix()));
+                let new_tris = extract_triangles_from_mesh(mesh, gx.to_matrix());
+                if !new_tris.is_empty() {
+                    let mat_id = match (mat, materials_opt) {
+                        (Some(mat3d), Some(materials)) => {
+                            let id = mat3d.0.id();
+                            *palette_lookup.entry(id).or_insert_with(|| {
+                                palette.push(material_albedo(&mat3d.0, materials));
+                                (palette.len() - 1) as u32
+                            })
+                        }
+                        _ => {
+                            // Mesh without a StandardMaterial — slot in
+                            // a default white albedo at palette[0].
+                            if palette.is_empty() {
+                                palette.push(Vec4::ONE);
+                            }
+                            0u32
+                        }
+                    };
+                    let n = new_tris.len();
+                    triangles.extend(new_tris);
+                    tri_materials.extend(std::iter::repeat(mat_id).take(n));
+                }
             }
         }
         if let Ok(children) = children_q.get(entity) {
@@ -150,10 +194,12 @@ pub fn build_bvh_when_scene_ready(
         percentile_trimmed_aabb(&triangles, AUTO_FIT_TRIM_LOW, AUTO_FIT_TRIM_HIGH);
 
     let count = triangles.len();
-    let bvh = build_world_bvh(triangles);
+    let mat_count = palette.len();
+    let bvh = build_world_bvh_with_materials(triangles, tri_materials, palette);
     info!(
-        "built ground-truth BVH from {} triangles, full aabb min=({:.1},{:.1},{:.1}) max=({:.1},{:.1},{:.1}), trimmed min=({:.1},{:.1},{:.1}) max=({:.1},{:.1},{:.1})",
+        "built ground-truth BVH from {} triangles, {} materials, full aabb min=({:.1},{:.1},{:.1}) max=({:.1},{:.1},{:.1}), trimmed min=({:.1},{:.1},{:.1}) max=({:.1},{:.1},{:.1})",
         count,
+        mat_count,
         bvh.cwbvh.total_aabb.min.x,
         bvh.cwbvh.total_aabb.min.y,
         bvh.cwbvh.total_aabb.min.z,

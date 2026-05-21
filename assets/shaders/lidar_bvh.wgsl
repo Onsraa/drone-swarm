@@ -20,7 +20,7 @@ struct LidarParams {
     max_points: u32,
     connected_mask_lo: u32,
     connected_mask_hi: u32,
-    _pad0: u32,
+    spray_use_albedo: u32,
     _pad1: u32,
 };
 
@@ -48,6 +48,8 @@ struct DroneScanParams {
 @group(0) @binding(14) var<storage, read> bvh_nodes: array<u32>;
 @group(0) @binding(15) var<storage, read> bvh_primitive_indices: array<u32>;
 @group(0) @binding(16) var<storage, read> bvh_triangle_vertices: array<vec4<f32>>;
+@group(0) @binding(17) var<storage, read> bvh_tri_materials: array<u32>;
+@group(0) @binding(18) var<storage, read> bvh_material_palette: array<vec4<f32>>;
 
 const MAX_LOCAL_ACTIVE_PER_DRONE: u32 = 200000u;
 const MAX_GLOBAL_ACTIVE: u32 = 500000u;
@@ -345,7 +347,7 @@ fn mark_cell_occupied(drone_idx: u32, flat: u32) {
     }
 }
 
-fn emit_point(drone_idx: u32, hit_world: vec3<f32>) {
+fn emit_point(drone_idx: u32, hit_world: vec3<f32>, color: vec4<f32>) {
     let mask = select(params.drone_mask_lo, params.drone_mask_hi, drone_idx >= 32u);
     if (((mask >> (drone_idx % 32u)) & 1u) == 0u) {
         return;
@@ -355,7 +357,7 @@ fn emit_point(drone_idx: u32, hit_world: vec3<f32>) {
     let base = slot * 2u;
     let spray_px: f32 = 4.0;
     point_buffer[base] = vec4<f32>(hit_world, spray_px);
-    point_buffer[base + 1u] = drone_colors[drone_idx];
+    point_buffer[base + 1u] = color;
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -384,5 +386,10 @@ fn lidar_bvh(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let flat = cell_flat_idx(hit_cell);
     mark_cell_occupied(drone_idx, flat);
-    emit_point(drone_idx, hit_world);
+
+    let tri_idx = bvh_primitive_indices[result.primitive_id];
+    let mat_id = bvh_tri_materials[tri_idx];
+    let albedo = bvh_material_palette[mat_id];
+    let color = select(drone_colors[drone_idx], albedo, params.spray_use_albedo != 0u);
+    emit_point(drone_idx, hit_world, color);
 }

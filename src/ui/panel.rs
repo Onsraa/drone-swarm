@@ -293,6 +293,10 @@ fn draw_lidar_sliders(ui: &mut egui::Ui, settings: &mut LidarSettings) {
         &mut settings.sticky_spray,
         "Sticky spray (accumulate hits)",
     );
+    ui.checkbox(
+        &mut settings.spray_use_albedo,
+        "Spray colour: mesh albedo (off = drone tint)",
+    );
 }
 
 fn role_letter(role: Role) -> &'static str {

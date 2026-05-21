@@ -74,7 +74,8 @@ pub struct LidarParams {
     pub max_points: u32,
     pub connected_mask_lo: u32,
     pub connected_mask_hi: u32,
-    pub _pad0: u32,
+    /// `1` -> spray points coloured by mesh albedo; `0` -> drone tint.
+    pub spray_use_albedo: u32,
     pub _pad1: u32,
 }
 
@@ -176,6 +177,17 @@ pub struct BvhPrimitiveIndicesBuffer(pub Handle<ShaderStorageBuffer>);
 #[derive(Resource, ExtractResource, Clone)]
 pub struct BvhTriangleVerticesBuffer(pub Handle<ShaderStorageBuffer>);
 
+/// Per-triangle material index (`array<u32>`, length = triangle count,
+/// parallel to the unindexed triangle list). Indexed by the value the
+/// BVH `primitive_indices` resolves to.
+#[derive(Resource, ExtractResource, Clone)]
+pub struct BvhTriMaterialsBuffer(pub Handle<ShaderStorageBuffer>);
+
+/// Per-material flat albedo (`array<vec4<f32>>`, RGBA in linear
+/// space). Indexed by the values in `BvhTriMaterialsBuffer`.
+#[derive(Resource, ExtractResource, Clone)]
+pub struct BvhMaterialPaletteBuffer(pub Handle<ShaderStorageBuffer>);
+
 /// One-shot startup: allocates every lidar input/output buffer.
 /// Positions and params start zeroed; the per-frame `upload_drone_*`
 /// systems fill them with real data once drones spawn.
@@ -196,7 +208,7 @@ pub fn setup_gpu_lidar_assets(
         max_points: MAX_LIDAR_POINTS,
         connected_mask_lo: u32::MAX,
         connected_mask_hi: u32::MAX,
-        _pad0: 0,
+        spray_use_albedo: 0,
         _pad1: 0,
     };
     let mut params_buf = ShaderStorageBuffer::from(params);
@@ -340,6 +352,14 @@ pub fn setup_gpu_lidar_assets(
     bvh_verts_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
     let bvh_verts_handle = buffers.add(bvh_verts_buf);
 
+    let mut bvh_tri_mats_buf = ShaderStorageBuffer::from(vec![0u32; 1]);
+    bvh_tri_mats_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let bvh_tri_mats_handle = buffers.add(bvh_tri_mats_buf);
+
+    let mut bvh_palette_buf = ShaderStorageBuffer::from(vec![Vec4::ONE]);
+    bvh_palette_buf.buffer_description.usage |= BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
+    let bvh_palette_handle = buffers.add(bvh_palette_buf);
+
     info!(
         "GPU lidar buffers allocated: {} drone slots, {} rays/scan, {} steps/ray, {} occupancy u32s ({} words/drone)",
         MAX_DRONES_GPU,
@@ -372,5 +392,7 @@ pub fn setup_gpu_lidar_assets(
     commands.insert_resource(BvhNodesBuffer(bvh_nodes_handle));
     commands.insert_resource(BvhPrimitiveIndicesBuffer(bvh_prim_idx_handle));
     commands.insert_resource(BvhTriangleVerticesBuffer(bvh_verts_handle));
+    commands.insert_resource(BvhTriMaterialsBuffer(bvh_tri_mats_handle));
+    commands.insert_resource(BvhMaterialPaletteBuffer(bvh_palette_handle));
     commands.insert_resource(RoleConeRanges(role_ranges));
 }

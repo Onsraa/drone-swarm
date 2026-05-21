@@ -11,18 +11,46 @@ use std::time::Duration;
 pub struct WorldBvh {
     pub triangles: Vec<Triangle>,
     pub cwbvh: CwBvh,
+    /// Material palette index per triangle (parallel to `triangles`,
+    /// indexed by the unindexed-triangle index that `bvh.primitive_indices`
+    /// resolves to).
+    pub tri_materials: Vec<u32>,
+    /// Per-material flat albedo. `(r, g, b, a)` in linear space, ready
+    /// for direct GPU sampling. Index by the values in `tri_materials`.
+    pub material_palette: Vec<Vec4>,
 }
 
 /// Build a CWBVH8 from a triangle list using obvhs' medium-quality
 /// build preset. Builder is one-shot per scene load; expect ~100 ms for
-/// 2 M tris on M4 Pro. Caller owns the triangle list lifetime.
+/// 2 M tris on M4 Pro. Caller owns the triangle list lifetime. Tests +
+/// pure helpers use this overload; the scene-walk path uses
+/// `build_world_bvh_with_materials` to attach the real palette.
+#[allow(dead_code)]
 pub fn build_world_bvh(triangles: Vec<Triangle>) -> WorldBvh {
+    let n = triangles.len();
+    build_world_bvh_with_materials(triangles, vec![0u32; n], vec![Vec4::ONE])
+}
+
+/// Full builder: triangles + per-triangle material indices + palette.
+/// `tri_materials.len()` must equal `triangles.len()` (one mat-id per
+/// unindexed triangle).
+pub fn build_world_bvh_with_materials(
+    triangles: Vec<Triangle>,
+    tri_materials: Vec<u32>,
+    material_palette: Vec<Vec4>,
+) -> WorldBvh {
+    debug_assert_eq!(tri_materials.len(), triangles.len());
     let cwbvh = build_cwbvh_from_tris(
         &triangles,
         BvhBuildParams::medium_build(),
         &mut Duration::default(),
     );
-    WorldBvh { triangles, cwbvh }
+    WorldBvh {
+        triangles,
+        cwbvh,
+        tri_materials,
+        material_palette,
+    }
 }
 
 /// Cast a ray into the BVH. Returns the hit distance `t` along the ray

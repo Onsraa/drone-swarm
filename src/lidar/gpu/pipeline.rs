@@ -64,6 +64,10 @@ pub fn init_compute_lidar_bvh_pipeline(
                 // 16: unindexed triangle vertex positions (3 × vec4 per
                 // triangle).
                 storage_buffer_read_only::<Vec<Vec4>>(false),
+                // 17: per-triangle material index.
+                storage_buffer_read_only::<Vec<u32>>(false),
+                // 18: per-material flat albedo (RGBA linear).
+                storage_buffer_read_only::<Vec<Vec4>>(false),
             ),
         ),
     );

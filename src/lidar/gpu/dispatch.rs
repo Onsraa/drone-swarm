@@ -13,11 +13,11 @@ use bevy::render::storage::GpuShaderStorageBuffer;
 use super::per_drone_scan::DroneScanParamsBuffer;
 use super::pipeline::ComputeLidarBvhPipeline;
 use super::resources::{
-    BvhNodesBuffer, BvhPrimitiveIndicesBuffer, BvhTriangleVerticesBuffer, DroneColorsBuffer,
-    DroneOrientationsBuffer, DronePositionsBuffer, GlobalActiveCellsBuffer, GlobalActiveCountBuffer,
-    GlobalOccupancyBuffer, LidarParamsBuffer, LidarPointCountBuffer, LidarPointVecBuffer,
-    LocalActiveCellsBuffer, LocalActiveCountBuffer, LocalOccupancyBuffer, RayDirsBuffer,
-    MAX_DRONES_GPU,
+    BvhMaterialPaletteBuffer, BvhNodesBuffer, BvhPrimitiveIndicesBuffer, BvhTriMaterialsBuffer,
+    BvhTriangleVerticesBuffer, DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer,
+    GlobalActiveCellsBuffer, GlobalActiveCountBuffer, GlobalOccupancyBuffer, LidarParamsBuffer,
+    LidarPointCountBuffer, LidarPointVecBuffer, LocalActiveCellsBuffer, LocalActiveCountBuffer,
+    LocalOccupancyBuffer, RayDirsBuffer, MAX_DRONES_GPU,
 };
 use crate::lidar::{LidarFrameCounter, LidarSettings};
 
@@ -42,6 +42,8 @@ pub(crate) struct BvhBuffers<'w> {
     pub nodes: Option<Res<'w, BvhNodesBuffer>>,
     pub primitive_indices: Option<Res<'w, BvhPrimitiveIndicesBuffer>>,
     pub triangle_vertices: Option<Res<'w, BvhTriangleVerticesBuffer>>,
+    pub tri_materials: Option<Res<'w, BvhTriMaterialsBuffer>>,
+    pub material_palette: Option<Res<'w, BvhMaterialPaletteBuffer>>,
 }
 
 #[derive(Resource)]
@@ -82,6 +84,8 @@ pub fn prepare_lidar_bvh_bind_group(
         Some(bvh_nodes),
         Some(bvh_prim_idx),
         Some(bvh_verts),
+        Some(bvh_tri_mats),
+        Some(bvh_palette),
     ) = (
         pipeline,
         params,
@@ -101,6 +105,8 @@ pub fn prepare_lidar_bvh_bind_group(
         bvh.nodes,
         bvh.primitive_indices,
         bvh.triangle_vertices,
+        bvh.tri_materials,
+        bvh.material_palette,
     )
     else {
         return;
@@ -122,6 +128,8 @@ pub fn prepare_lidar_bvh_bind_group(
     let Some(bvh_nodes_buf) = buffers.get(&bvh_nodes.0) else { return };
     let Some(bvh_prim_idx_buf) = buffers.get(&bvh_prim_idx.0) else { return };
     let Some(bvh_verts_buf) = buffers.get(&bvh_verts.0) else { return };
+    let Some(bvh_tri_mats_buf) = buffers.get(&bvh_tri_mats.0) else { return };
+    let Some(bvh_palette_buf) = buffers.get(&bvh_palette.0) else { return };
 
     let bind_group = render_device.create_bind_group(
         "compute lidar bvh bind group",
@@ -144,6 +152,8 @@ pub fn prepare_lidar_bvh_bind_group(
             bvh_nodes_buf.buffer.as_entire_buffer_binding(),
             bvh_prim_idx_buf.buffer.as_entire_buffer_binding(),
             bvh_verts_buf.buffer.as_entire_buffer_binding(),
+            bvh_tri_mats_buf.buffer.as_entire_buffer_binding(),
+            bvh_palette_buf.buffer.as_entire_buffer_binding(),
         )),
     );
     commands.insert_resource(LidarBvhBindGroup(bind_group));

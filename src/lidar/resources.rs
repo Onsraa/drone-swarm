@@ -23,6 +23,10 @@ pub struct LidarSettings {
     /// accumulated point cloud instead of a pulsing spray. Toggling
     /// back to `false` naturally clears on the next dispatch.
     pub sticky_spray: bool,
+    /// When `true`, the spray buffer's per-point colour is sampled
+    /// from the mesh material's flat albedo at the hit triangle
+    /// instead of the drone's own role tint.
+    pub spray_use_albedo: bool,
 }
 
 impl Default for LidarSettings {
@@ -33,6 +37,7 @@ impl Default for LidarSettings {
             max_steps_per_ray: 96,
             scan_interval_frames: 1,
             sticky_spray: false,
+            spray_use_albedo: false,
         }
     }
 }

@@ -8,12 +8,12 @@ mod resources;
 
 pub use per_drone_scan::{DroneScanParams, DroneScanParamsBuffer};
 pub use resources::{
-    BuildIndirectBuffer, BuildLocalParamsBuffer, BvhNodesBuffer, BvhPrimitiveIndicesBuffer,
-    BvhTriangleVerticesBuffer, DroneColorsBuffer, DroneOrientationsBuffer, DronePositionsBuffer,
-    GlobalActiveCellsBuffer, GlobalActiveCountBuffer, GlobalInstanceCountBuffer,
-    GlobalInstanceVecBuffer, GlobalOccupancyBuffer, LidarParamsBuffer, LidarPointCountBuffer,
-    LidarPointVecBuffer, LocalActiveCellsBuffer, LocalActiveCountBuffer, LocalInstanceCountBuffer,
-    LocalInstanceVecBuffer, RayDirsBuffer, RoleConeRanges,
+    BuildIndirectBuffer, BuildLocalParamsBuffer, BvhMaterialPaletteBuffer, BvhNodesBuffer,
+    BvhPrimitiveIndicesBuffer, BvhTriMaterialsBuffer, BvhTriangleVerticesBuffer, DroneColorsBuffer,
+    DroneOrientationsBuffer, DronePositionsBuffer, GlobalActiveCellsBuffer, GlobalActiveCountBuffer,
+    GlobalInstanceCountBuffer, GlobalInstanceVecBuffer, GlobalOccupancyBuffer, LidarParamsBuffer,
+    LidarPointCountBuffer, LidarPointVecBuffer, LocalActiveCellsBuffer, LocalActiveCountBuffer,
+    LocalInstanceCountBuffer, LocalInstanceVecBuffer, RayDirsBuffer, RoleConeRanges,
 };
 
 use bevy::prelude::*;
@@ -103,6 +103,8 @@ impl Plugin for GpuLidarPlugin {
             .add_plugins(ExtractResourcePlugin::<BvhNodesBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<BvhPrimitiveIndicesBuffer>::default())
             .add_plugins(ExtractResourcePlugin::<BvhTriangleVerticesBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<BvhTriMaterialsBuffer>::default())
+            .add_plugins(ExtractResourcePlugin::<BvhMaterialPaletteBuffer>::default())
             .add_systems(
                 Update,
                 (
@@ -117,7 +119,9 @@ impl Plugin for GpuLidarPlugin {
                         .run_if(resource_exists::<GlobalOccupancyBuffer>),
                     upload_bvh_buffers
                         .run_if(resource_exists::<WorldBvh>)
-                        .run_if(resource_exists::<BvhNodesBuffer>),
+                        .run_if(resource_exists::<BvhNodesBuffer>)
+                        .run_if(resource_exists::<BvhTriMaterialsBuffer>)
+                        .run_if(resource_exists::<BvhMaterialPaletteBuffer>),
                 ),
             );
 
@@ -169,11 +173,14 @@ impl Plugin for GpuLidarPlugin {
 /// whenever the BVH is added or rebuilt. `set_data` reallocates the
 /// underlying GPU buffer; the bind group rebuilds every frame so the
 /// new handle is picked up automatically.
+#[allow(clippy::too_many_arguments)]
 fn upload_bvh_buffers(
     mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
     nodes_handle: Res<BvhNodesBuffer>,
     prim_idx_handle: Res<BvhPrimitiveIndicesBuffer>,
     verts_handle: Res<BvhTriangleVerticesBuffer>,
+    tri_mats_handle: Res<BvhTriMaterialsBuffer>,
+    palette_handle: Res<BvhMaterialPaletteBuffer>,
     world_bvh: Res<WorldBvh>,
 ) {
     if !world_bvh.is_added() && !world_bvh.is_changed() {
@@ -196,6 +203,16 @@ fn upload_bvh_buffers(
     }
     let vert_count = verts.len();
 
+    let tri_mats = world_bvh.tri_materials.clone();
+    // Palette must be non-empty for the bind group to be valid; pad to
+    // a single white entry if the scene had no StandardMaterials.
+    let palette = if world_bvh.material_palette.is_empty() {
+        vec![Vec4::ONE]
+    } else {
+        world_bvh.material_palette.clone()
+    };
+    let mat_count = palette.len();
+
     if let Some(buf) = buffers.get_mut(&nodes_handle.0) {
         buf.set_data(nodes_u32);
     }
@@ -205,10 +222,16 @@ fn upload_bvh_buffers(
     if let Some(buf) = buffers.get_mut(&verts_handle.0) {
         buf.set_data(verts);
     }
+    if let Some(buf) = buffers.get_mut(&tri_mats_handle.0) {
+        buf.set_data(tri_mats);
+    }
+    if let Some(buf) = buffers.get_mut(&palette_handle.0) {
+        buf.set_data(palette);
+    }
 
     info!(
-        "uploaded BVH to GPU: nodes={}, prim_indices={}, vertices={}",
-        node_count, prim_count, vert_count
+        "uploaded BVH to GPU: nodes={}, prim_indices={}, vertices={}, materials={}",
+        node_count, prim_count, vert_count, mat_count
     );
 }
 
@@ -258,7 +281,7 @@ fn upload_drone_state(
             max_points: MAX_LIDAR_POINTS,
             connected_mask_lo: comms.connected_mask[0],
             connected_mask_hi: comms.connected_mask[1],
-            _pad0: 0,
+            spray_use_albedo: settings.spray_use_albedo as u32,
             _pad1: 0,
         };
         buf.set_data(params);
