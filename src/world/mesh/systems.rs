@@ -145,7 +145,16 @@ pub fn build_bvh_when_scene_ready(
 
     let count = triangles.len();
     let bvh = build_world_bvh(triangles);
-    info!("built ground-truth BVH from {} triangles", count);
+    info!(
+        "built ground-truth BVH from {} triangles, aabb min=({:.1},{:.1},{:.1}) max=({:.1},{:.1},{:.1})",
+        count,
+        bvh.cwbvh.total_aabb.min.x,
+        bvh.cwbvh.total_aabb.min.y,
+        bvh.cwbvh.total_aabb.min.z,
+        bvh.cwbvh.total_aabb.max.x,
+        bvh.cwbvh.total_aabb.max.y,
+        bvh.cwbvh.total_aabb.max.z,
+    );
 
     // One-shot auto-fit: requires WorldConfig + a matching
     // applied_transform (so we only fit the first build, not the
