@@ -28,7 +28,6 @@ pub fn build_world_bvh(triangles: Vec<Triangle>) -> WorldBvh {
 /// Cast a ray into the BVH. Returns the hit distance `t` along the ray
 /// if any primitive was intersected. Direction is normalized internally.
 /// Used in Phase 3 to port `raycast_dda` off the voxel grid.
-#[allow(dead_code)]
 pub fn cast_ray(bvh: &WorldBvh, origin: Vec3, direction: Vec3) -> Option<f32> {
     let ray = Ray::new_inf(
         Vec3A::new(origin.x, origin.y, origin.z),
@@ -78,6 +77,18 @@ pub fn recommended_transform(
     );
 
     (new_translation, new_scale)
+}
+
+/// World-Y of the first downward-hit on the BVH at world (x, z).
+/// Casts from `sky_y` straight down; returns `Some(hit_y)` on hit,
+/// `None` if no geometry is below the sky point.
+pub fn ground_altitude(bvh: &WorldBvh, x: f32, z: f32, sky_y: f32) -> Option<f32> {
+    let t = cast_ray(
+        bvh,
+        Vec3::new(x, sky_y, z),
+        Vec3::new(0.0, -1.0, 0.0),
+    )?;
+    Some(sky_y - t)
 }
 
 #[cfg(test)]
@@ -188,6 +199,32 @@ mod tests {
         // horiz_extent = 512 = target -> scale_mult = 1.0 -> new_scale = cur_s
         assert!((s - cur_s).abs() < 0.01, "scale should be stable: {} vs {}", s, cur_s);
         assert_vec3_near(t, cur_t, 0.5);
+    }
+
+    #[test]
+    fn ground_altitude_returns_floor_height() {
+        // A 2x2 floor triangle at y=10.
+        let tri = Triangle {
+            v0: Vec3A::new(0.0, 10.0, 0.0),
+            v1: Vec3A::new(2.0, 10.0, 0.0),
+            v2: Vec3A::new(0.0, 10.0, 2.0),
+        };
+        let bvh = build_world_bvh(vec![tri]);
+        let h = ground_altitude(&bvh, 0.25, 0.25, 100.0);
+        assert!(h.is_some());
+        assert!(
+            (h.unwrap() - 10.0).abs() < 1e-3,
+            "expected ground y ~ 10, got {:?}",
+            h
+        );
+    }
+
+    #[test]
+    fn ground_altitude_returns_none_off_geometry() {
+        let tri = single_xz_triangle();
+        let bvh = build_world_bvh(vec![tri]);
+        let h = ground_altitude(&bvh, 100.0, 100.0, 50.0);
+        assert!(h.is_none());
     }
 
     #[test]

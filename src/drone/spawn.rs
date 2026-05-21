@@ -5,10 +5,12 @@ use bevy::prelude::*;
 use crate::exploration::{GhostMemory, LastRoleChange, Role, RoleParams, Trail};
 use crate::physics::{DesiredVelocity, LinearVelocity, PrevLinvel};
 use crate::sensors::DetectorHits;
-use crate::world::WorldConfig;
+use crate::world::{ground_altitude, WorldBvh, WorldConfig};
 
 use super::components::{Drone, DroneColor, DroneId};
-use super::constants::DRONE_SPAWN_RADIUS_METERS;
+use super::constants::{
+    DRONE_SPAWN_RADIUS_METERS, SPAWN_GROUND_CLEARANCE_M, SPAWN_SKY_CAST_Y,
+};
 use super::resources::{DroneBodyAssets, DroneSpawnConfig};
 
 /// Each frame, if the drone count doesn't match `DroneSpawnConfig.target_count`,
@@ -51,11 +53,17 @@ pub fn respawn_drones_if_needed(
     spawn_config: Res<DroneSpawnConfig>,
     world: Res<WorldConfig>,
     map: Option<Res<crate::world::GroundTruthMap>>,
+    bvh: Option<Res<WorldBvh>>,
     body_assets: Option<Res<DroneBodyAssets>>,
     drones_q: Query<Entity, With<Drone>>,
 ) {
     let current_count = drones_q.iter().count() as u32;
-    if current_count == spawn_config.target_count {
+    // Also respawn when WorldBvh is freshly inserted / replaced, so
+    // drones leave the voxel-altitude position they got at startup
+    // (or after a previous mesh transform) and snap onto the new
+    // mesh surface via the BVH sky-cast.
+    let bvh_changed = bvh.as_ref().is_some_and(|b| b.is_changed());
+    if current_count == spawn_config.target_count && !bvh_changed {
         return;
     }
     let Some(body_assets) = body_assets else {
@@ -74,6 +82,7 @@ pub fn respawn_drones_if_needed(
             id,
             target,
             map.as_deref(),
+            bvh.as_deref(),
             world.voxel_size,
         );
         let role = role_for_index(id, target);
@@ -137,17 +146,15 @@ pub fn sync_color_to_role(
 /// Stagger N drones around the world center on a horizontal ring of
 /// `DRONE_SPAWN_RADIUS_METERS`. With N = 1 the drone lands at center.
 ///
-/// Altitude comes from `GroundTruthMap::safe_spawn_cell_y` when a map
-/// is present: walks the column at the drone's (x, z) and picks the
-/// lowest Free cell that has 4 cells of clearance above it. Falls back
-/// to `center.y` if no map is loaded or the column is fully occupied.
-/// A tiny per-id altitude jitter prevents perfect stacking on the
-/// same Y plane.
+/// Altitude priority: BVH sky-cast hit + clearance (when `WorldBvh` is
+/// present), then voxel `GroundTruthMap::safe_spawn_cell_y`, then
+/// world centre. A small per-id Y jitter prevents perfect Y stacking.
 fn ring_position(
     center: Vec3,
     id: u32,
     count: u32,
     map: Option<&crate::world::GroundTruthMap>,
+    bvh: Option<&WorldBvh>,
     voxel_size: f32,
 ) -> Vec3 {
     let (x, z) = if count <= 1 {
@@ -160,12 +167,16 @@ fn ring_position(
         )
     };
 
-    let cell_x = (x / voxel_size).floor() as i32;
-    let cell_z = (z / voxel_size).floor() as i32;
-    let y = map
-        .and_then(|m| m.safe_spawn_cell_y(cell_x, cell_z, 4))
-        .map(|cy| (cy as f32 + 0.5) * voxel_size + 3.0)
-        .unwrap_or(center.y);
+    let bvh_y = bvh
+        .and_then(|b| ground_altitude(b, x, z, SPAWN_SKY_CAST_Y))
+        .map(|gy| gy + SPAWN_GROUND_CLEARANCE_M);
+    let voxel_y = || {
+        let cell_x = (x / voxel_size).floor() as i32;
+        let cell_z = (z / voxel_size).floor() as i32;
+        map.and_then(|m| m.safe_spawn_cell_y(cell_x, cell_z, 4))
+            .map(|cy| (cy as f32 + 0.5) * voxel_size + 3.0)
+    };
+    let y = bvh_y.or_else(voxel_y).unwrap_or(center.y);
 
     // 0–1.5 m altitude jitter per id so consecutive drones don't
     // stack on identical Y at spawn (and immediately fight the
