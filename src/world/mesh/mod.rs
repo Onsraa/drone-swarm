@@ -1,7 +1,9 @@
+mod bvh;
 mod components;
 mod constants;
 mod resources;
 mod systems;
+mod triangles;
 
 use bevy::prelude::*;
 
@@ -16,6 +18,7 @@ impl Plugin for MeshGroundTruthPlugin {
             (
                 systems::spawn_mesh_ground_truth,
                 systems::apply_mesh_visibility,
+                systems::build_bvh_when_scene_ready,
             ),
         );
     }

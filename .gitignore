@@ -2,3 +2,5 @@
 .DS_Store
 .superpowers/
 assets/maps/terrain.vox
+assets/maps/city.glb
+assets/scenes/*.glb
