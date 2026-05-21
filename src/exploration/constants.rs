@@ -32,3 +32,14 @@ pub const MAPPER_GRADIENT_BETA: f32 = 0.6;
 /// α = 0.25 → ~4-frame time constant, kills self-deposit oscillation
 /// without making the scout slow to react to real gradient shifts.
 pub const SCOUT_EMA_ALPHA: f32 = 0.25;
+
+/// Frontier-attraction weight in role steering. The role's local
+/// direction (anti-pheromone for Scout, two-channel gradient for
+/// Mapper) is blended with a unit vector pointing at the assigned
+/// frontier cluster centroid:
+/// `dir = (frontier * w + local * (1 - w)).normalize()`. Higher = more
+/// goal-directed; lower = more reactive to local field. Scouts lean
+/// harder on the frontier (long-range exploration); Mappers stay
+/// closer to scout trails (detail work along the way).
+pub const SCOUT_FRONTIER_WEIGHT: f32 = 0.7;
+pub const MAPPER_FRONTIER_WEIGHT: f32 = 0.5;

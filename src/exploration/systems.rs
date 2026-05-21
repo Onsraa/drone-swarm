@@ -15,9 +15,10 @@ use crate::sensors::DetectorHits;
 
 use super::components::{GhostMemory, GhostPeer, ScoutGradientEma, Trail};
 use super::constants::{
-    MAPPER_GRADIENT_ALPHA, MAPPER_GRADIENT_BETA, PEER_BUBBLE_RADIUS_M, SCOUT_EMA_ALPHA,
-    TRAIL_MAX_POINTS, TRAIL_SAMPLE_INTERVAL_SECS,
+    MAPPER_FRONTIER_WEIGHT, MAPPER_GRADIENT_ALPHA, MAPPER_GRADIENT_BETA, PEER_BUBBLE_RADIUS_M,
+    SCOUT_EMA_ALPHA, SCOUT_FRONTIER_WEIGHT, TRAIL_MAX_POINTS, TRAIL_SAMPLE_INTERVAL_SECS,
 };
+use super::frontier::FrontierAssignments;
 use super::role::{peer_repulsion_for, Role, RoleParams};
 use super::steering::{reactive_force, reactive_force_peers};
 
@@ -80,6 +81,7 @@ pub fn draw_trail_gizmos(
 pub fn apply_role_steering(
     time: Res<Time>,
     pheromone: Res<PheromoneField>,
+    assignments: Res<FrontierAssignments>,
     world: Res<crate::world::WorldConfig>,
     comms_state: Res<CommsState>,
     comms_settings: Res<crate::comms::CommsSettings>,
@@ -138,17 +140,34 @@ pub fn apply_role_steering(
         }
         let terrain = reactive_force(pos, &hits_buf, &[], avoid_k);
 
+        let frontier_dir = assignments
+            .targets
+            .get(&id.0)
+            .map(|target| (*target - pos).normalize_or_zero())
+            .unwrap_or(Vec3::ZERO);
+
         let role_force = match role {
             Role::Scout => {
-                // Anti-gradient of the combined (Scout+Mapper) field —
-                // any drone's recent footprint repels.
+                // Local anti-gradient of the combined (Scout+Mapper)
+                // field — any drone's recent footprint repels. EMA
+                // smooths the local term across frames to kill
+                // self-deposit oscillation.
                 let anti = -pheromone.gradient_at_sum(pos);
                 let fresh = anti.normalize_or_zero();
-                // EMA over previous direction kills self-deposit
-                // oscillation. When fresh is zero the EMA keeps the
-                // drone moving in its last committed direction.
                 let blended = scout_ema.dir.lerp(fresh, SCOUT_EMA_ALPHA);
-                let dir = blended.normalize_or_zero();
+                let local_dir = blended.normalize_or_zero();
+                scout_ema.dir = local_dir;
+
+                // Long-range goal: blend in the assigned frontier
+                // cluster centroid. Scouts lean harder on the frontier
+                // than mappers do (`SCOUT_FRONTIER_WEIGHT`).
+                let combined = if frontier_dir != Vec3::ZERO {
+                    frontier_dir * SCOUT_FRONTIER_WEIGHT
+                        + local_dir * (1.0 - SCOUT_FRONTIER_WEIGHT)
+                } else {
+                    local_dir
+                };
+                let dir = combined.normalize_or_zero();
                 if dir == Vec3::ZERO {
                     let outward = (pos - world_center).normalize_or_zero();
                     let fallback = if outward == Vec3::ZERO {
@@ -159,24 +178,31 @@ pub fn apply_role_steering(
                     scout_ema.dir = fallback;
                     fallback * cruise
                 } else {
-                    scout_ema.dir = dir;
                     dir * cruise
                 }
             }
             Role::Mapper => {
-                // Two-channel gradient: follow Scout trails (+α·∇scout)
-                // while repelling from regions other Mappers have
-                // already detailed (-β·∇mapper).
+                // Local two-channel gradient: follow Scout trails while
+                // repelling from regions other Mappers have detailed.
                 let g_scout = pheromone.gradient_at_channel(pos, Channel::Scout);
                 let g_mapper = pheromone.gradient_at_channel(pos, Channel::Mapper);
-                let combined = g_scout * MAPPER_GRADIENT_ALPHA - g_mapper * MAPPER_GRADIENT_BETA;
+                let local_combined =
+                    g_scout * MAPPER_GRADIENT_ALPHA - g_mapper * MAPPER_GRADIENT_BETA;
+                let local_dir = local_combined.normalize_or_zero();
+
+                // Long-range goal: blend in the assigned frontier
+                // cluster centroid. Mappers split weight ~half-half so
+                // they continue detail-mapping along the path.
+                let combined = if frontier_dir != Vec3::ZERO {
+                    frontier_dir * MAPPER_FRONTIER_WEIGHT
+                        + local_dir * (1.0 - MAPPER_FRONTIER_WEIGHT)
+                } else {
+                    local_dir
+                };
                 let dir = combined.normalize_or_zero();
                 if dir != Vec3::ZERO {
                     dir * cruise
                 } else {
-                    // Stall fix: when no useful gradient, drift outward
-                    // from world center. Frontier-attraction (Phase B)
-                    // will replace this with a real goal.
                     let outward = (pos - world_center).normalize_or_zero();
                     if outward == Vec3::ZERO {
                         Vec3::ZERO
