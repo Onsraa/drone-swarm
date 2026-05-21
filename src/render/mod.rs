@@ -11,7 +11,7 @@ mod resources;
 
 use bevy::prelude::*;
 
-pub use components::{GpuGlobalMapVoxel, GpuLocalMapVoxel, LidarPointVoxel};
+pub use components::{GpuGlobalMapVoxel, GpuLocalMapVoxel, LidarPointVoxel, PheromoneVoxel};
 
 use assets::init_voxel_assets;
 use gpu_global_map::GpuGlobalMapPlugin;

@@ -15,3 +15,9 @@ pub struct GpuGlobalMapVoxel;
 /// a Readback over `LidarPointCountBuffer`.
 #[derive(Component)]
 pub struct LidarPointVoxel;
+
+/// Marker for the pheromone-field heatmap render entity. CPU-driven:
+/// a system rebuilds the `InstancedVoxelLayer.data` from the scalar
+/// field every `PHEROMONE_REBUILD_INTERVAL_FRAMES` frames.
+#[derive(Component)]
+pub struct PheromoneVoxel;

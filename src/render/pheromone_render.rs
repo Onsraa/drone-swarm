@@ -1,50 +1,83 @@
-//! Pheromone-field heatmap render. Walks the `PheromoneField` scalar
-//! grid each frame, drawing a small wireframe cube at every cell whose
-//! intensity exceeds `VIZ_THRESHOLD`. Color interpolates between cool
-//! cyan (low intensity) and warm yellow (high), alpha proportional to
-//! intensity.
-//!
-//! Implementation uses gizmos rather than a custom instanced pipeline
-//! because pheromone activity is sparse (typically <500 cells over
-//! VIZ_THRESHOLD at swarm scale) and we want a one-system, easy-to-
-//! tweak overlay.
+//! Pheromone-field heatmap render. CPU rebuilds an
+//! `InstancedVoxelLayer` from the scalar field every
+//! `PHEROMONE_REBUILD_INTERVAL_FRAMES` frames; the existing billboard
+//! pipeline (`instanced_voxel.wgsl`) draws each cell as a screen-space
+//! dot. Cheaper than the previous gizmo-cube path once activity is
+//! dense (>500 cells).
 
+use bevy::camera::visibility::NoFrustumCulling;
 use bevy::prelude::*;
 
 use crate::pheromone::PheromoneField;
-use crate::ui::UiState;
+
+use super::components::PheromoneVoxel;
+use super::instancing::{InstanceData, InstancedVoxelLayer};
+use super::resources::CubeMesh;
 
 const VIZ_THRESHOLD: f32 = 5.0;
 const VIZ_INTENSITY_FULL: f32 = 200.0;
-const VIZ_CUBE_SIZE_RATIO: f32 = 0.4;
+const VIZ_PIXEL_RADIUS: f32 = 3.5;
+const PHEROMONE_REBUILD_INTERVAL_FRAMES: u32 = 12;
 
 pub struct PheromoneRenderPlugin;
 
 impl Plugin for PheromoneRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, draw_pheromone_field);
+        app.add_systems(
+            Update,
+            (spawn_pheromone_layer, rebuild_pheromone_instances).chain(),
+        );
     }
 }
 
-fn draw_pheromone_field(
-    ui_state: Res<UiState>,
-    field: Res<PheromoneField>,
-    mut gizmos: Gizmos,
+fn spawn_pheromone_layer(
+    mut commands: Commands,
+    quad: Option<Res<CubeMesh>>,
+    existing: Query<(), With<PheromoneVoxel>>,
 ) {
-    if !ui_state.show_pheromone_field {
+    if !existing.is_empty() {
         return;
     }
-    if field.cells.is_empty() {
+    let Some(quad) = quad else {
+        return;
+    };
+    commands.spawn((
+        PheromoneVoxel,
+        Mesh3d(quad.0.clone()),
+        InstancedVoxelLayer {
+            data: Vec::new(),
+            generation: 1,
+        },
+        NoFrustumCulling,
+        Transform::IDENTITY,
+        Visibility::default(),
+    ));
+}
+
+fn rebuild_pheromone_instances(
+    field: Res<PheromoneField>,
+    mut layer_q: Query<&mut InstancedVoxelLayer, With<PheromoneVoxel>>,
+    mut frame: Local<u32>,
+) {
+    *frame = frame.wrapping_add(1);
+    if *frame % PHEROMONE_REBUILD_INTERVAL_FRAMES != 0 {
         return;
     }
+    let Ok(mut layer) = layer_q.single_mut() else {
+        return;
+    };
     let cell_size = field.cell_size();
-    if cell_size <= 0.0 {
+    if cell_size <= 0.0 || field.cells.is_empty() {
+        if !layer.data.is_empty() {
+            layer.data.clear();
+            layer.generation = layer.generation.wrapping_add(1);
+        }
         return;
     }
-    let viz_size = cell_size * VIZ_CUBE_SIZE_RATIO;
     let dx = field.dims.x;
     let dy = field.dims.y;
     let plane = dx * dy;
+    layer.data.clear();
 
     for (i, &v) in field.cells.iter().enumerate() {
         if v < VIZ_THRESHOLD {
@@ -61,15 +94,16 @@ fn draw_pheromone_field(
             (z as f32 + 0.5) * cell_size,
         );
         let t = (v / VIZ_INTENSITY_FULL).clamp(0.0, 1.0);
-        // cyan (low) -> yellow (high)
+        // cyan (low) -> yellow (high). Alpha ramps with intensity so
+        // weak cells stay subtle.
         let r = 0.25 + 0.75 * t;
         let g = 0.85;
         let b = 0.95 - 0.85 * t;
-        let alpha = 0.18 + 0.55 * t;
-        let color = Color::linear_rgba(r, g, b, alpha);
-        let iso = Isometry3d::from_translation(center);
-        let scale = Vec3::splat(viz_size);
-        let transform = Transform::from_isometry(iso).with_scale(scale);
-        gizmos.cube(transform, color);
+        let alpha = 0.20 + 0.55 * t;
+        layer.data.push(InstanceData {
+            pos_scale: [center.x, center.y, center.z, VIZ_PIXEL_RADIUS],
+            color: [r, g, b, alpha],
+        });
     }
+    layer.generation = layer.generation.wrapping_add(1);
 }

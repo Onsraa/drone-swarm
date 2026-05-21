@@ -12,7 +12,7 @@ use bevy::render::sync_world::{RenderEntity, SyncToRenderWorld};
 use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems};
 
 pub use buffer::InstanceBuffer;
-pub use components::InstancedVoxelLayer;
+pub use components::{InstanceData, InstancedVoxelLayer};
 pub use draw::DrawVoxelInstanced;
 pub use pipeline::VoxelInstancedPipeline;
 
