@@ -10,14 +10,74 @@ use super::resources::MeshGroundTruthConfig;
 use super::triangles::{extract_triangles_from_mesh, percentile_trimmed_aabb};
 use crate::world::WorldConfig;
 
-fn material_albedo(handle: &Handle<StandardMaterial>, materials: &Assets<StandardMaterial>) -> Vec4 {
-    materials
-        .get(handle)
-        .map(|m| {
-            let lin = m.base_color.to_linear();
-            Vec4::new(lin.red, lin.green, lin.blue, lin.alpha)
-        })
-        .unwrap_or(Vec4::ONE)
+fn material_albedo(
+    handle: &Handle<StandardMaterial>,
+    materials: &Assets<StandardMaterial>,
+    images: Option<&Assets<Image>>,
+) -> Vec4 {
+    let Some(mat) = materials.get(handle) else {
+        return Vec4::ONE;
+    };
+    let tint = {
+        let lin = mat.base_color.to_linear();
+        Vec4::new(lin.red, lin.green, lin.blue, lin.alpha)
+    };
+    if let (Some(tex_handle), Some(images)) = (&mat.base_color_texture, images) {
+        if let Some(image) = images.get(tex_handle) {
+            if let Some(mean) = image_mean_linear(image) {
+                return mean * tint;
+            }
+        }
+    }
+    tint
+}
+
+fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Downsampled mean of an RGBA image in linear space. Returns `None`
+/// for unsupported pixel formats; the caller falls back to the
+/// material's flat `base_color` tint. Decimates the pixel walk to
+/// `~10k` samples so the per-scene material bake stays sub-millisecond
+/// even for 4K textures.
+fn image_mean_linear(image: &Image) -> Option<Vec4> {
+    use bevy::render::render_resource::TextureFormat;
+    let data = image.data.as_deref()?;
+    let format = image.texture_descriptor.format;
+    let (bytes_per_pixel, is_srgb) = match format {
+        TextureFormat::Rgba8UnormSrgb => (4usize, true),
+        TextureFormat::Rgba8Unorm => (4usize, false),
+        _ => return None,
+    };
+    let pixel_count = data.len() / bytes_per_pixel;
+    if pixel_count == 0 {
+        return None;
+    }
+    let stride = (pixel_count / 10_000).max(1);
+    let mut sum = Vec4::ZERO;
+    let mut count = 0u32;
+    let mut i = 0;
+    while i < pixel_count {
+        let base = i * bytes_per_pixel;
+        let r = data[base] as f32 / 255.0;
+        let g = data[base + 1] as f32 / 255.0;
+        let b = data[base + 2] as f32 / 255.0;
+        let a = data[base + 3] as f32 / 255.0;
+        let (lr, lg, lb) = if is_srgb {
+            (srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b))
+        } else {
+            (r, g, b)
+        };
+        sum += Vec4::new(lr, lg, lb, a);
+        count += 1;
+        i += stride;
+    }
+    Some(sum / count as f32)
 }
 
 const APPLY_EPS: f32 = 1.0e-4;
@@ -116,10 +176,12 @@ pub fn apply_mesh_visibility(
 /// few frames after spawn return zero triangles; once the SceneSpawner
 /// has populated children, the build fires and `WorldBvh` is inserted.
 /// Subsequent runs early-out via the `bvh_present` guard.
+#[allow(clippy::too_many_arguments)]
 pub fn build_bvh_when_scene_ready(
     mut commands: Commands,
     meshes: Option<Res<Assets<Mesh>>>,
     materials: Option<Res<Assets<StandardMaterial>>>,
+    images: Option<Res<Assets<Image>>>,
     bvh_present: Option<Res<WorldBvh>>,
     mut config: ResMut<MeshGroundTruthConfig>,
     world_config: Option<Res<WorldConfig>>,
@@ -141,6 +203,7 @@ pub fn build_bvh_when_scene_ready(
         return;
     };
     let materials_opt = materials.as_deref();
+    let images_opt = images.as_deref();
 
     let mut triangles: Vec<obvhs::triangle::Triangle> = Vec::new();
     let mut tri_materials: Vec<u32> = Vec::new();
@@ -157,7 +220,7 @@ pub fn build_bvh_when_scene_ready(
                         (Some(mat3d), Some(materials)) => {
                             let id = mat3d.0.id();
                             *palette_lookup.entry(id).or_insert_with(|| {
-                                palette.push(material_albedo(&mat3d.0, materials));
+                                palette.push(material_albedo(&mat3d.0, materials, images_opt));
                                 (palette.len() - 1) as u32
                             })
                         }
