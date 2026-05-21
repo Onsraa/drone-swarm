@@ -322,6 +322,21 @@ fn cell_in_bounds(cell: vec3<i32>) -> bool {
         && u32(cell.z) < params.dims.z;
 }
 
+fn mark_cell_free(drone_idx: u32, flat: u32) {
+    let cells_per_drone = params.dims.x * params.dims.y * params.dims.z;
+    let words_per_drone = (cells_per_drone + 15u) / 16u;
+    let word_idx = drone_idx * words_per_drone + flat / 16u;
+    let bit_offset = (flat % 16u) * 2u;
+    let mask = 1u << bit_offset;
+    atomicOr(&local_occupancy[word_idx], mask);
+
+    let comms = select(params.connected_mask_lo, params.connected_mask_hi, drone_idx >= 32u);
+    if (((comms >> (drone_idx % 32u)) & 1u) != 0u) {
+        let global_word = flat / 16u;
+        atomicOr(&global_occupancy[global_word], mask);
+    }
+}
+
 fn mark_cell_occupied(drone_idx: u32, flat: u32) {
     let cells_per_drone = params.dims.x * params.dims.y * params.dims.z;
     let words_per_drone = (cells_per_drone + 15u) / 16u;
@@ -371,6 +386,22 @@ fn lidar_bvh(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (drone_idx >= params.drone_count) { return; }
     let scan = drone_scan[drone_idx];
     let ray_local_idx = gid.y;
+
+    // Mark the drone's current cell as Free once per drone per frame.
+    // Runs before the ray-count + scan-interval gates so Anchors
+    // (ray_count = 0) and scan-skipped drones still drop a Free
+    // breadcrumb. Comms-gated inside `mark_cell_free` so disconnected
+    // drones only update their per-drone occupancy.
+    if (ray_local_idx == 0u) {
+        let origin_world_self =
+            drone_positions[drone_idx].xyz * params.voxel_size;
+        let drone_cell = vec3<i32>(floor(origin_world_self / params.voxel_size));
+        if (cell_in_bounds(drone_cell)) {
+            let flat_self = cell_flat_idx(drone_cell);
+            mark_cell_free(drone_idx, flat_self);
+        }
+    }
+
     if (ray_local_idx >= scan.ray_count) { return; }
 
     // Per-drone scan-interval gating. Stagger via `+ drone_idx` so
