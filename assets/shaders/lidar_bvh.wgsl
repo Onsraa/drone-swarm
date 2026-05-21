@@ -388,11 +388,12 @@ fn lidar_bvh(@builtin(global_invocation_id) gid: vec3<u32>) {
     let ray_local_idx = gid.y;
 
     // Mark the drone's current cell as Free once per drone per frame.
-    // Runs before the ray-count + scan-interval gates so Anchors
-    // (ray_count = 0) and scan-skipped drones still drop a Free
-    // breadcrumb. Comms-gated inside `mark_cell_free` so disconnected
-    // drones only update their per-drone occupancy.
-    if (ray_local_idx == 0u) {
+    // Runs before the scan-interval gate so scan-skipped drones still
+    // drop a Free breadcrumb. Anchors (`ray_count == 0`) are pure
+    // relays and intentionally skipped — they don't contribute to the
+    // map. Comms-gated inside `mark_cell_free` so disconnected drones
+    // only update their per-drone occupancy.
+    if (ray_local_idx == 0u && scan.ray_count > 0u) {
         let origin_world_self =
             drone_positions[drone_idx].xyz * params.voxel_size;
         let drone_cell = vec3<i32>(floor(origin_world_self / params.voxel_size));
