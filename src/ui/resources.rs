@@ -59,6 +59,13 @@ impl UiState {
     }
 }
 
+/// Set by the side-panel draw system each frame: `true` when the
+/// pointer is over the egui panel (or egui wants pointer input).
+/// Camera input systems early-return when set so dragging on the panel
+/// doesn't rotate or zoom the scene.
+#[derive(Resource, Default, Clone, Copy, Debug)]
+pub struct UiPointerCapture(pub bool);
+
 impl Default for UiState {
     fn default() -> Self {
         Self {

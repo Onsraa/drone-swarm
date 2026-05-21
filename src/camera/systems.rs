@@ -2,6 +2,7 @@ use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
 use bevy::render::view::NoIndirectDrawing;
 
+use crate::ui::UiPointerCapture;
 use crate::world::WorldConfig;
 
 use super::components::{FreeFlyCamera, OrbitCamera};
@@ -67,12 +68,16 @@ pub fn toggle_camera_mode(
 
 pub fn orbit_input(
     mode: Res<CameraMode>,
+    pointer_capture: Res<UiPointerCapture>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
     scroll: Res<AccumulatedMouseScroll>,
     mut q: Query<&mut OrbitCamera>,
 ) {
     if *mode != CameraMode::Orbit {
+        return;
+    }
+    if pointer_capture.0 {
         return;
     }
     let Ok(mut cam) = q.single_mut() else {
@@ -111,6 +116,7 @@ pub fn sync_camera_transform(
 /// up/down feel intuitive regardless of pitch.
 pub fn freefly_input(
     mode: Res<CameraMode>,
+    pointer_capture: Res<UiPointerCapture>,
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
@@ -125,7 +131,14 @@ pub fn freefly_input(
     };
     let dt = time.delta_secs();
 
-    if mouse_buttons.pressed(MouseButton::Right) && motion.delta != Vec2::ZERO {
+    // Pointer over egui: skip mouse-driven look but keep WASD movement
+    // active so the user can still navigate while reading the panel.
+    let mouse_blocked = pointer_capture.0;
+
+    if !mouse_blocked
+        && mouse_buttons.pressed(MouseButton::Right)
+        && motion.delta != Vec2::ZERO
+    {
         cam.yaw -= motion.delta.x * FREEFLY_LOOK_SENSITIVITY;
         cam.pitch = (cam.pitch - motion.delta.y * FREEFLY_LOOK_SENSITIVITY)
             .clamp(-FREEFLY_PITCH_LIMIT, FREEFLY_PITCH_LIMIT);

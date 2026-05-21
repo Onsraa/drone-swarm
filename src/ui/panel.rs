@@ -13,7 +13,7 @@ use crate::maps::{AvailableMaps, MapSwapRequested};
 use crate::world::{MeshGroundTruthConfig, WorldConfig};
 
 use super::constants::SIDE_PANEL_DEFAULT_WIDTH;
-use super::resources::UiState;
+use super::resources::{UiPointerCapture, UiState};
 
 /// Bundle of single-Res<...> toggles to keep `draw_ui` under Bevy's
 /// 16-parameter system limit.
@@ -21,6 +21,7 @@ use super::resources::UiState;
 pub struct PanelToggles<'w> {
     pub mesh_gt: ResMut<'w, MeshGroundTruthConfig>,
     pub lidar_mode: ResMut<'w, LidarSourceMode>,
+    pub pointer_capture: ResMut<'w, UiPointerCapture>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -51,83 +52,95 @@ pub fn draw_ui(
     egui::SidePanel::right("side_panel")
         .default_width(SIDE_PANEL_DEFAULT_WIDTH)
         .show(ctx, |ui| {
-            ui.heading("Drones — Phase 6");
-            ui.label(format!("FPS: {:.0}", fps));
-            ui.separator();
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.heading("Drones — Phase 6");
+                    ui.label(format!("FPS: {:.0}", fps));
+                    ui.separator();
 
-            draw_map_picker(ui, &mut available, &mut swap_writer);
-            ui.separator();
+                    draw_map_picker(ui, &mut available, &mut swap_writer);
+                    ui.separator();
 
-            ui.label("Layers");
-            ui.checkbox(&mut state.show_ground_truth, "Show ground truth cubes (debug)");
-            ui.checkbox(&mut toggles.mesh_gt.visible, "Show ground truth mesh");
-            ui.checkbox(&mut state.show_local_maps, "Show drone local maps");
-            ui.checkbox(&mut state.show_global_map, "Show central map");
-            ui.checkbox(&mut state.show_lidar_points, "Show lidar spray (GPU points)");
-            ui.checkbox(&mut state.show_detector_rays, "Show detector rays (grey)");
-            ui.checkbox(&mut state.show_lidar_rays, "Show lidar rays (role-tinted)");
-            ui.checkbox(&mut state.show_pheromone_field, "Show pheromone field");
-            ui.checkbox(&mut state.show_trails, "Show drone trails");
-            ui.checkbox(&mut state.show_paths, "Show drone paths + targets");
-            ui.separator();
+                    ui.label("Layers");
+                    ui.checkbox(&mut state.show_ground_truth, "Show ground truth cubes (debug)");
+                    ui.checkbox(&mut toggles.mesh_gt.visible, "Show ground truth mesh");
+                    ui.checkbox(&mut state.show_local_maps, "Show drone local maps");
+                    ui.checkbox(&mut state.show_global_map, "Show central map");
+                    ui.checkbox(&mut state.show_lidar_points, "Show lidar spray (GPU points)");
+                    ui.checkbox(&mut state.show_detector_rays, "Show detector rays (grey)");
+                    ui.checkbox(&mut state.show_lidar_rays, "Show lidar rays (role-tinted)");
+                    ui.checkbox(&mut state.show_pheromone_field, "Show pheromone field");
+                    ui.checkbox(&mut state.show_trails, "Show drone trails");
+                    ui.checkbox(&mut state.show_paths, "Show drone paths + targets");
+                    ui.separator();
 
-            ui.label("Swarm size");
-            ui.add(
-                egui::Slider::new(
-                    &mut spawn_config.target_count,
-                    MIN_DRONE_COUNT..=MAX_DRONE_COUNT,
-                )
-                .text("drones"),
-            );
-            let drone_count = drones_q.iter().count();
-            ui.label(format!("Drones live: {}", drone_count));
-            ui.separator();
+                    ui.label("Swarm size");
+                    ui.add(
+                        egui::Slider::new(
+                            &mut spawn_config.target_count,
+                            MIN_DRONE_COUNT..=MAX_DRONE_COUNT,
+                        )
+                        .text("drones"),
+                    );
+                    let drone_count = drones_q.iter().count();
+                    ui.label(format!("Drones live: {}", drone_count));
+                    ui.separator();
 
-            draw_lidar_sliders(ui, &mut lidar_settings);
-            ui.horizontal(|ui| {
-                ui.label("Lidar source:");
-                let mut is_bvh = *toggles.lidar_mode == LidarSourceMode::Bvh;
-                if ui.radio_value(&mut is_bvh, false, "DDA (voxel)").clicked() {
-                    *toggles.lidar_mode = LidarSourceMode::Dda;
-                }
-                if ui.radio_value(&mut is_bvh, true, "BVH (mesh)").clicked() {
-                    *toggles.lidar_mode = LidarSourceMode::Bvh;
-                }
-            });
-            ui.separator();
+                    draw_lidar_sliders(ui, &mut lidar_settings);
+                    ui.horizontal(|ui| {
+                        ui.label("Lidar source:");
+                        let mut is_bvh = *toggles.lidar_mode == LidarSourceMode::Bvh;
+                        if ui.radio_value(&mut is_bvh, false, "DDA (voxel)").clicked() {
+                            *toggles.lidar_mode = LidarSourceMode::Dda;
+                        }
+                        if ui.radio_value(&mut is_bvh, true, "BVH (mesh)").clicked() {
+                            *toggles.lidar_mode = LidarSourceMode::Bvh;
+                        }
+                    });
+                    ui.separator();
 
-            draw_comms_controls(ui, &mut comms_settings, &comms_state);
-            ui.separator();
+                    draw_comms_controls(ui, &mut comms_settings, &comms_state);
+                    ui.separator();
 
-            draw_drone_telemetry(ui, &mut state, &drones_q, &comms_state);
-            draw_group_presets(ui, &mut state, &mut presets, &mut preset_name_buf);
-            ui.separator();
+                    draw_drone_telemetry(ui, &mut state, &drones_q, &comms_state);
+                    draw_group_presets(ui, &mut state, &mut presets, &mut preset_name_buf);
+                    ui.separator();
 
-            draw_roles(ui, &drones_q);
-            ui.separator();
+                    draw_roles(ui, &drones_q);
+                    ui.separator();
 
-            ui.label("Central map (GPU readback):");
-            let total = (world.size.x * world.size.y * world.size.z) as usize;
-            let free = gpu_stats.free;
-            let occupied = gpu_stats.occupied;
-            let coverage_pct = if total > 0 {
-                (free + occupied) as f32 / total as f32 * 100.0
-            } else {
-                0.0
-            };
-            ui.label(format!(
-                "  free {} | occ {} | / {} ({:.1}% known)",
-                free, occupied, total, coverage_pct
-            ));
-            ui.separator();
+                    ui.label("Central map (GPU readback):");
+                    let total = (world.size.x * world.size.y * world.size.z) as usize;
+                    let free = gpu_stats.free;
+                    let occupied = gpu_stats.occupied;
+                    let coverage_pct = if total > 0 {
+                        (free + occupied) as f32 / total as f32 * 100.0
+                    } else {
+                        0.0
+                    };
+                    ui.label(format!(
+                        "  free {} | occ {} | / {} ({:.1}% known)",
+                        free, occupied, total, coverage_pct
+                    ));
+                    ui.separator();
 
-            match *camera_mode {
-                CameraMode::Orbit => ui.label("Orbit cam: LMB drag, scroll zoom. F = free-fly."),
-                CameraMode::FreeFly => {
-                    ui.label("Free-fly: WASD move, Space/Shift up/down, RMB drag look, Ctrl boost. F = orbit.")
-                }
-            };
+                    match *camera_mode {
+                        CameraMode::Orbit => {
+                            ui.label("Orbit cam: LMB drag, scroll zoom. F = free-fly.")
+                        }
+                        CameraMode::FreeFly => ui.label(
+                            "Free-fly: WASD move, Space/Shift up/down, RMB drag look, Ctrl boost. F = orbit.",
+                        ),
+                    };
+                });
         });
+
+    // Pointer capture for camera input gating: true when the cursor is
+    // over the egui panel OR egui is consuming pointer/scroll events
+    // (e.g. dragging a slider). Camera systems read this and early-out.
+    toggles.pointer_capture.0 =
+        ctx.is_pointer_over_area() || ctx.wants_pointer_input();
     Ok(())
 }
 
