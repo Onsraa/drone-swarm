@@ -16,3 +16,10 @@ pub const DEFAULT_SCENE_SCALE: f32 = 1.0;
 /// cover after auto-fit. 0.8 leaves ~10% padding on each side for
 /// drones to fly around the geometry without spawning inside it.
 pub const AUTO_FIT_COVERAGE_RATIO: f32 = 0.8;
+
+/// Centroid-percentile range used to trim outlier geometry when
+/// computing the AABB the auto-fit reads. `(0.05, 0.95)` ignores the
+/// lowest + highest 5% along each axis — handles sky-domes, distant
+/// helpers, stray vertices that would otherwise bloat the AABB.
+pub const AUTO_FIT_TRIM_LOW: f32 = 0.05;
+pub const AUTO_FIT_TRIM_HIGH: f32 = 0.95;

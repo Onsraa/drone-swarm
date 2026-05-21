@@ -126,30 +126,30 @@ pub fn draw_ui(
                         &mut toggles.mesh_gt.auto_fit_on_first_build,
                         "Auto-fit on next load",
                     );
+                    // Slider ranges are intentionally wide so the
+                    // auto-fit's suggested values never get clamped
+                    // silently on display. DragValue inputs allow
+                    // exceeding the slider range too.
                     ui.add(
-                        egui::Slider::new(
-                            &mut toggles.mesh_gt.translation.x,
-                            -640.0..=1280.0,
-                        )
-                        .text("pos X"),
+                        egui::DragValue::new(&mut toggles.mesh_gt.translation.x)
+                            .speed(1.0)
+                            .prefix("pos X: "),
                     );
                     ui.add(
-                        egui::Slider::new(
-                            &mut toggles.mesh_gt.translation.y,
-                            -40.0..=80.0,
-                        )
-                        .text("pos Y"),
+                        egui::DragValue::new(&mut toggles.mesh_gt.translation.y)
+                            .speed(1.0)
+                            .prefix("pos Y: "),
                     );
                     ui.add(
-                        egui::Slider::new(
-                            &mut toggles.mesh_gt.translation.z,
-                            -640.0..=1280.0,
-                        )
-                        .text("pos Z"),
+                        egui::DragValue::new(&mut toggles.mesh_gt.translation.z)
+                            .speed(1.0)
+                            .prefix("pos Z: "),
                     );
                     ui.add(
-                        egui::Slider::new(&mut toggles.mesh_gt.scale, 0.1..=200.0)
-                            .text("scale"),
+                        egui::DragValue::new(&mut toggles.mesh_gt.scale)
+                            .speed(0.01)
+                            .range(0.001..=10_000.0)
+                            .prefix("scale: "),
                     );
                     ui.horizontal(|ui| {
                         if ui.button("Apply (respawn + rebuild BVH)").clicked() {

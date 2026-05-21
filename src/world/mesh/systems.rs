@@ -3,9 +3,9 @@ use bevy::scene::SceneRoot;
 
 use super::bvh::{build_world_bvh, recommended_transform, WorldBvh};
 use super::components::GroundTruthMesh;
-use super::constants::AUTO_FIT_COVERAGE_RATIO;
+use super::constants::{AUTO_FIT_COVERAGE_RATIO, AUTO_FIT_TRIM_HIGH, AUTO_FIT_TRIM_LOW};
 use super::resources::MeshGroundTruthConfig;
-use super::triangles::extract_triangles_from_mesh;
+use super::triangles::{extract_triangles_from_mesh, percentile_trimmed_aabb};
 use crate::world::WorldConfig;
 
 const APPLY_EPS: f32 = 1.0e-4;
@@ -143,10 +143,16 @@ pub fn build_bvh_when_scene_ready(
         return;
     }
 
+    // Auto-fit reads a percentile-trimmed AABB to ignore outlier
+    // geometry (sky-domes, antennas, stray hierarchy nodes). Compute
+    // it from the triangle list before consuming it into the BVH.
+    let (trim_min, trim_max) =
+        percentile_trimmed_aabb(&triangles, AUTO_FIT_TRIM_LOW, AUTO_FIT_TRIM_HIGH);
+
     let count = triangles.len();
     let bvh = build_world_bvh(triangles);
     info!(
-        "built ground-truth BVH from {} triangles, aabb min=({:.1},{:.1},{:.1}) max=({:.1},{:.1},{:.1})",
+        "built ground-truth BVH from {} triangles, full aabb min=({:.1},{:.1},{:.1}) max=({:.1},{:.1},{:.1}), trimmed min=({:.1},{:.1},{:.1}) max=({:.1},{:.1},{:.1})",
         count,
         bvh.cwbvh.total_aabb.min.x,
         bvh.cwbvh.total_aabb.min.y,
@@ -154,29 +160,22 @@ pub fn build_bvh_when_scene_ready(
         bvh.cwbvh.total_aabb.max.x,
         bvh.cwbvh.total_aabb.max.y,
         bvh.cwbvh.total_aabb.max.z,
+        trim_min.x, trim_min.y, trim_min.z,
+        trim_max.x, trim_max.y, trim_max.z,
     );
 
     // One-shot auto-fit: requires WorldConfig + a matching
     // applied_transform (so we only fit the first build, not the
-    // post-fit rebuild).
+    // post-fit rebuild). Uses the trimmed AABB so outlier geometry
+    // doesn't bloat the scale calculation.
     let applied_matches = config
         .applied_transform
         .is_some_and(|a| a == (config.translation, config.scale));
     if config.auto_fit_on_first_build && applied_matches {
         if let Some(world) = world_config.as_ref() {
-            let aabb_min = Vec3::new(
-                bvh.cwbvh.total_aabb.min.x,
-                bvh.cwbvh.total_aabb.min.y,
-                bvh.cwbvh.total_aabb.min.z,
-            );
-            let aabb_max = Vec3::new(
-                bvh.cwbvh.total_aabb.max.x,
-                bvh.cwbvh.total_aabb.max.y,
-                bvh.cwbvh.total_aabb.max.z,
-            );
             let (new_t, new_s) = recommended_transform(
-                aabb_min,
-                aabb_max,
+                trim_min,
+                trim_max,
                 world.world_size(),
                 config.translation,
                 config.scale,
