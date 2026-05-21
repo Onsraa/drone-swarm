@@ -13,7 +13,10 @@ use super::per_drone_scan::{allocate_buffer as alloc_scan_params, DroneScanParam
 pub struct RoleConeRanges(pub [RoleConeRange; 3]);
 
 pub const MAX_STEPS_PER_RAY: u32 = 96;
-pub const MAX_DRONES_GPU: u32 = 50;
+/// Matches `MAX_DRONE_COUNT` so the GPU buffers cover the full
+/// possible drone roster. 64 is the upper bound for the
+/// `drone_mask: [u32; 2]` 64-bit visibility + comms masks.
+pub const MAX_DRONES_GPU: u32 = 64;
 
 /// Soft cap on points the lidar point buffer can hold. The shader
 /// soft-truncates writes past this slot via `slot >= max_points`.

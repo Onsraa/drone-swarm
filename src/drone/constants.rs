@@ -1,6 +1,8 @@
 pub const DEFAULT_DRONE_COUNT: u32 = 3;
 pub const MIN_DRONE_COUNT: u32 = 1;
-pub const MAX_DRONE_COUNT: u32 = 50;
+/// Capped at 64 so the `drone_mask: [u32; 2]` visibility/comms masks
+/// (one bit per drone) still fit without widening the WGSL layout.
+pub const MAX_DRONE_COUNT: u32 = 64;
 /// Horizontal radius (meters) of the spawn ring around the world center.
 pub const DRONE_SPAWN_RADIUS_METERS: f32 = 120.0;
 
