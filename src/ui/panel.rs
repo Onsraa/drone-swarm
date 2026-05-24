@@ -66,6 +66,8 @@ pub fn draw_ui(
                     ui.checkbox(&mut state.show_pheromone_field, "Show pheromone field");
                     ui.checkbox(&mut state.show_trails, "Show drone trails");
                     ui.checkbox(&mut state.show_paths, "Show drone paths + targets");
+                    ui.checkbox(&mut state.show_frontiers, "Show frontiers (clusters + targets)");
+                    ui.checkbox(&mut state.show_anchor_targets, "Show anchor chain + targets");
                     ui.separator();
 
                     ui.label("Swarm size");

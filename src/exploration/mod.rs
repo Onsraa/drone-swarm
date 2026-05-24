@@ -17,7 +17,9 @@ pub use role::{Role, RoleParams};
 pub use supervisor::{LastRoleChange, SupervisorTimer};
 
 use crate::physics::PhysicsSet;
-use systems::{apply_role_steering, draw_trail_gizmos, sample_trails};
+use systems::{
+    apply_role_steering, draw_anchor_gizmos, draw_frontier_gizmos, draw_trail_gizmos, sample_trails,
+};
 
 pub struct ExplorationPlugin;
 
@@ -27,6 +29,14 @@ impl Plugin for ExplorationPlugin {
             .add_plugins((FrontierPlugin, AnchorPlannerPlugin))
             .add_systems(Update, supervisor::supervisor_tick)
             .add_systems(Update, apply_role_steering.before(PhysicsSet::Control))
-            .add_systems(Update, (sample_trails, draw_trail_gizmos));
+            .add_systems(
+                Update,
+                (
+                    sample_trails,
+                    draw_trail_gizmos,
+                    draw_frontier_gizmos,
+                    draw_anchor_gizmos,
+                ),
+            );
     }
 }

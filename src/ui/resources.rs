@@ -23,6 +23,13 @@ pub struct UiState {
     pub show_lidar_rays: bool,
     /// Subsampled pheromone-field heatmap as billboard squares.
     pub show_pheromone_field: bool,
+    /// Frontier cluster centroids (orange spheres sized by cell count)
+    /// + a faint line from each drone to its assigned frontier target.
+    pub show_frontiers: bool,
+    /// Comms BFS tree edges (green→red by stretch ratio) + a cyan line
+    /// from each anchor to the stretched-edge midpoint the planner
+    /// assigned it.
+    pub show_anchor_targets: bool,
     /// 64-bit visibility mask, bit `i` = drone id `i` rendered in the
     /// local-map layer. `[lo, hi]` halves match the WGSL pair on the
     /// build-shader side. Default all-ones (every drone visible).
@@ -77,6 +84,8 @@ impl Default for UiState {
             show_detector_rays: true,
             show_lidar_rays: true,
             show_pheromone_field: true,
+            show_frontiers: false,
+            show_anchor_targets: false,
             drone_mask: [u32::MAX, u32::MAX],
         }
     }

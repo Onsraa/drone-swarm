@@ -7,8 +7,8 @@
 
 use bevy::prelude::*;
 
-use crate::comms::CommsState;
-use crate::drone::{Drone, DroneColor, DroneId};
+use crate::comms::{CommsState, PARENT_BASE, PARENT_NONE};
+use crate::drone::{Drone, DroneColor, DroneId, MAX_DRONE_COUNT};
 use crate::pheromone::{Channel, PheromoneField};
 use crate::physics::DesiredVelocity;
 use crate::sensors::DetectorHits;
@@ -19,7 +19,7 @@ use super::constants::{
     SCOUT_EMA_ALPHA, SCOUT_FRONTIER_WEIGHT, TRAIL_MAX_POINTS, TRAIL_SAMPLE_INTERVAL_SECS,
 };
 use super::anchor_planner::AnchorAssignments;
-use super::frontier::FrontierAssignments;
+use super::frontier::{FrontierAssignments, FrontierField};
 use super::role::{peer_repulsion_for, Role, RoleParams};
 use super::steering::{reactive_force, reactive_force_peers};
 
@@ -67,6 +67,91 @@ pub fn draw_trail_gizmos(
         if let Some(last) = trail.points.back() {
             let c = Color::linear_rgba(base.red, base.green, base.blue, 1.0);
             gizmos.line(*last, transform.translation, c);
+        }
+    }
+}
+
+/// Debug overlay: frontier cluster centroids as orange spheres sized
+/// by cell count, plus a faint line from each drone to its assigned
+/// frontier target. Gated on `UiState.show_frontiers`.
+pub fn draw_frontier_gizmos(
+    ui_state: Res<crate::ui::UiState>,
+    field: Res<FrontierField>,
+    assignments: Res<FrontierAssignments>,
+    drones: Query<(&DroneId, &Transform), With<Drone>>,
+    mut gizmos: Gizmos,
+) {
+    if !ui_state.show_frontiers {
+        return;
+    }
+    let orange = Color::linear_rgba(1.0, 0.55, 0.1, 0.9);
+    let orange_faint = Color::linear_rgba(1.0, 0.55, 0.1, 0.35);
+    for cluster in &field.clusters {
+        let r = 1.5 + (cluster.cell_count as f32).sqrt();
+        gizmos.sphere(Isometry3d::from_translation(cluster.centroid), r, orange);
+    }
+    for (id, transform) in &drones {
+        if let Some(target) = assignments.targets.get(&id.0) {
+            gizmos.line(transform.translation, *target, orange_faint);
+        }
+    }
+}
+
+/// Debug overlay: comms BFS tree edges colored by stretch ratio
+/// (green = slack, red = near range limit), plus a cyan line + ring
+/// from each anchor to the stretched-edge midpoint the planner assigned
+/// it. Gated on `UiState.show_anchor_targets`.
+pub fn draw_anchor_gizmos(
+    ui_state: Res<crate::ui::UiState>,
+    comms_state: Res<CommsState>,
+    comms_settings: Res<crate::comms::CommsSettings>,
+    anchor_assignments: Res<AnchorAssignments>,
+    drones: Query<(&DroneId, &Transform), With<Drone>>,
+    mut gizmos: Gizmos,
+) {
+    if !ui_state.show_anchor_targets {
+        return;
+    }
+    // Position lookup by drone id for parent-edge resolution.
+    let mut pos_by_id: [Option<Vec3>; MAX_DRONE_COUNT as usize] =
+        [None; MAX_DRONE_COUNT as usize];
+    for (id, transform) in &drones {
+        let i = id.0 as usize;
+        if i < pos_by_id.len() {
+            pos_by_id[i] = Some(transform.translation);
+        }
+    }
+    // BFS tree edges, colored by how close each link is to the range
+    // limit. Shows chain health + the gaps the planner is repairing.
+    let range = comms_settings.range_m.max(1.0);
+    for i in 0..pos_by_id.len() {
+        let Some(child) = pos_by_id[i] else { continue };
+        let parent = comms_state.bfs_parent[i];
+        if parent == PARENT_NONE {
+            continue;
+        }
+        let parent_pos = if parent == PARENT_BASE {
+            comms_state.base_pos
+        } else {
+            let pi = parent as usize;
+            if pi >= pos_by_id.len() {
+                continue;
+            }
+            match pos_by_id[pi] {
+                Some(p) => p,
+                None => continue,
+            }
+        };
+        let ratio = (child.distance(parent_pos) / range).clamp(0.0, 1.0);
+        let color = Color::linear_rgba(ratio, 1.0 - ratio, 0.2, 0.55);
+        gizmos.line(child, parent_pos, color);
+    }
+    // Anchor -> planner target.
+    let cyan = Color::linear_rgba(0.1, 0.9, 0.95, 0.9);
+    for (id, transform) in &drones {
+        if let Some(target) = anchor_assignments.targets.get(&id.0) {
+            gizmos.line(transform.translation, *target, cyan);
+            gizmos.circle(Isometry3d::from_translation(*target), 2.5, cyan);
         }
     }
 }
